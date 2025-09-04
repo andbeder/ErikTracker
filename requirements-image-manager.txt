@@ -1,0 +1,24 @@
+# Erik Image Manager Requirements
+
+# Flask web framework
+Flask>=3.0.0
+Werkzeug>=3.0.0
+
+# Image processing
+Pillow>=10.0.0
+
+# MQTT client
+paho-mqtt>=1.6.0
+
+# YAML configuration
+PyYAML>=6.0.0
+
+# Utilities
+python-dateutil>=2.8.0
+requests>=2.31.0
+
+# Yard mapping dependencies
+numpy>=1.24.0
+matplotlib>=3.7.0
+plyfile>=1.0.0
+trimesh>=4.0.0

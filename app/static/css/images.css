@@ -1,0 +1,448 @@
+/* ==========================================================================
+   IMAGES.CSS - Image Management Styles
+   ========================================================================== */
+
+/* ==========================================================================
+   IMAGE UPLOAD SECTIONS
+   ========================================================================== */
+
+.upload-section {
+    background: #f8f9fa;
+    border-radius: 10px;
+    padding: 25px;
+    margin-bottom: 30px;
+    border: 2px dashed #dee2e6;
+    transition: all 0.3s ease;
+}
+
+.upload-section:hover {
+    border-color: #4facfe;
+    background: #f0f8ff;
+}
+
+.upload-area {
+    margin-bottom: 30px;
+}
+
+.upload-box {
+    border: 3px dashed #007bff;
+    border-radius: 15px;
+    padding: 40px;
+    text-align: center;
+    background: linear-gradient(135deg, #f8f9ff 0%, #e8f0ff 100%);
+    cursor: pointer;
+    transition: all 0.3s ease;
+    margin-bottom: 20px;
+}
+
+.upload-box:hover {
+    border-color: #0056b3;
+    background: linear-gradient(135deg, #e8f0ff 0%, #d0e7ff 100%);
+    transform: translateY(-2px);
+}
+
+.upload-icon {
+    font-size: 48px;
+    margin-bottom: 15px;
+}
+
+.upload-text {
+    font-size: 16px;
+    color: #333;
+}
+
+/* ==========================================================================
+   IMAGE GRIDS & LAYOUTS
+   ========================================================================== */
+
+.image-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 25px;
+    margin-top: 30px;
+}
+
+/* ==========================================================================
+   IMAGE CARDS
+   ========================================================================== */
+
+.image-card {
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+    transition: all 0.3s ease;
+    border: 1px solid #eee;
+}
+
+.image-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+}
+
+.image-info {
+    margin-bottom: 15px;
+}
+
+.image-filename {
+    font-weight: bold;
+    color: #333;
+    margin-bottom: 8px;
+    word-break: break-all;
+}
+
+.image-details {
+    font-size: 0.9em;
+    color: #666;
+    line-height: 1.5;
+}
+
+.image-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+/* ==========================================================================
+   IMAGE THUMBNAILS
+   ========================================================================== */
+
+.image-thumbnail {
+    width: 100%;
+    height: 200px;
+    object-fit: cover;
+    border-radius: 8px;
+    margin-bottom: 15px;
+    border: 2px solid #f1f3f4;
+}
+
+/* Camera Thumbnails */
+.camera-thumbnail {
+    margin: 15px 0;
+}
+
+.thumbnail-container {
+    position: relative;
+    width: 100%;
+    height: 200px;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    background: #f0f0f0;
+}
+
+.thumbnail-image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: opacity 0.3s ease;
+    opacity: 0;
+}
+
+.thumbnail-image.loaded {
+    opacity: 1;
+}
+
+.thumbnail-overlay {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(to top, rgba(0,0,0,0.8), transparent);
+    color: white;
+    padding: 12px 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.thumbnail-label {
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.thumbnail-status {
+    font-size: 12px;
+    background: rgba(255, 255, 255, 0.2);
+    padding: 4px 8px;
+    border-radius: 12px;
+    backdrop-filter: blur(4px);
+}
+
+.thumbnail-error {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: #f8f9fa;
+    color: #6c757d;
+}
+
+.error-icon {
+    font-size: 3em;
+    margin-bottom: 10px;
+    opacity: 0.5;
+}
+
+.error-text {
+    font-size: 14px;
+    font-weight: 500;
+}
+
+/* ==========================================================================
+   VIDEO MANAGEMENT
+   ========================================================================== */
+
+.video-list {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.video-item {
+    background: #f8f9fa;
+    border-radius: 10px;
+    padding: 20px;
+    border-left: 4px solid #007bff;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.video-info {
+    flex: 1;
+}
+
+.video-name {
+    font-weight: bold;
+    color: #333;
+    margin-bottom: 5px;
+}
+
+.video-size {
+    color: #666;
+    font-size: 0.9em;
+}
+
+.video-actions {
+    display: flex;
+    gap: 10px;
+}
+
+/* ==========================================================================
+   CAMERA SNAPSHOTS & PREVIEWS
+   ========================================================================== */
+
+.camera-snapshot {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.pose-preview {
+    position: relative;
+    width: 100%;
+    height: 180px;
+    margin-bottom: 15px;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #f0f0f0;
+}
+
+.pose-preview-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.pose-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.pose-preview:hover .pose-overlay {
+    opacity: 1;
+}
+
+/* ==========================================================================
+   FULLSCREEN IMAGE VIEW
+   ========================================================================== */
+
+#camera-fullscreen-view {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.95);
+    z-index: 1000;
+    padding: 20px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+}
+
+.fullscreen-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    color: white;
+    flex-shrink: 0;
+    z-index: 1001;
+    background: rgba(0, 0, 0, 0.8);
+    padding: 15px;
+    border-radius: 10px;
+}
+
+.fullscreen-header h3 {
+    margin: 0;
+    font-size: 24px;
+}
+
+.fullscreen-controls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.fullscreen-content {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+    position: relative;
+}
+
+.fullscreen-content img,
+.fullscreen-content video {
+    max-width: 100%;
+    max-height: 100%;
+    width: auto;
+    height: auto;
+    border-radius: 10px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+/* ==========================================================================
+   IMAGE PROCESSING STATUS
+   ========================================================================== */
+
+.processing-status {
+    margin-top: 15px;
+    padding: 10px;
+    border-radius: 5px;
+    font-weight: bold;
+    display: none;
+}
+
+.processing-status.success {
+    background: #d4edda;
+    color: #155724;
+    display: block;
+}
+
+.processing-status.error {
+    background: #f8d7da;
+    color: #721c24;
+    display: block;
+}
+
+.processing-status.running {
+    background: #fff3cd;
+    color: #856404;
+    display: block;
+}
+
+/* ==========================================================================
+   MOBILE RESPONSIVE ADJUSTMENTS
+   ========================================================================== */
+
+@media (max-width: 768px) {
+    .image-grid {
+        grid-template-columns: 1fr;
+        gap: 20px;
+    }
+    
+    .fullscreen-header {
+        flex-direction: column;
+        gap: 15px;
+        text-align: center;
+        padding: 10px;
+    }
+    
+    .fullscreen-header h3 {
+        font-size: 18px;
+    }
+    
+    .fullscreen-controls {
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+    
+    #camera-fullscreen-view {
+        padding: 10px;
+    }
+    
+    .upload-box {
+        padding: 30px 20px;
+    }
+    
+    .upload-icon {
+        font-size: 36px;
+    }
+    
+    .thumbnail-container {
+        height: 160px;
+    }
+    
+    .pose-preview {
+        height: 140px;
+    }
+}
+
+@media (max-width: 480px) {
+    .upload-box {
+        padding: 25px 15px;
+    }
+    
+    .upload-icon {
+        font-size: 32px;
+    }
+    
+    .upload-text {
+        font-size: 14px;
+    }
+    
+    .image-card {
+        padding: 15px;
+    }
+    
+    .image-thumbnail {
+        height: 150px;
+    }
+    
+    .thumbnail-container {
+        height: 120px;
+    }
+    
+    .pose-preview {
+        height: 120px;
+    }
+}

@@ -1,0 +1,246 @@
+volumes:
+  postgres-data:
+
+networks:
+  nvr_net:
+    driver: bridge
+    
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    networks: [nvr_net]
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+    restart: unless-stopped
+
+  frigate:
+    image: ghcr.io/blakeblackshear/frigate:0.16.0-tensorrt
+    shm_size: "512m"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    volumes:
+      - ./frigate/config:/config
+      - ./frigate/media:/media/frigate
+    ports:
+      - "5000:5000"
+    networks: [nvr_net]
+    depends_on:
+      - mosquitto
+    restart: unless-stopped
+
+  double-take:
+    image: jakowenko/double-take:1.13.1
+    ports:
+      - "3000:3000"
+    networks: [nvr_net]
+    depends_on:
+      - compreface-api
+      - mosquitto
+    restart: unless-stopped
+    volumes:
+      - ./double-take/config.yml:/double-take/config.yml:ro
+      - ./double-take/.storage:/.storage
+
+  home-assistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    network_mode: host
+    volumes:
+      - ./homeassistant:/config
+    depends_on:
+      - mosquitto
+    restart: unless-stopped
+
+  compreface-postgres-db:
+    image: ${registry}compreface-postgres-db:${POSTGRES_VERSION}
+    restart: always
+    container_name: "compreface-postgres-db"
+    environment:
+      - POSTGRES_USER=${postgres_username}
+      - POSTGRES_PASSWORD=${postgres_password}
+      - POSTGRES_DB=${postgres_db}
+    networks: [nvr_net]
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  compreface-admin:
+    restart: always
+    image: ${registry}compreface-admin:${ADMIN_VERSION}
+    container_name: "compreface-admin"
+    environment:
+      - POSTGRES_USER=${postgres_username}
+      - POSTGRES_PASSWORD=${postgres_password}
+      - POSTGRES_URL=jdbc:postgresql://compreface-postgres-db:5432/${postgres_db}  # <— set service name
+      - SPRING_PROFILES_ACTIVE=dev
+      - ENABLE_EMAIL_SERVER=${enable_email_server}
+      - EMAIL_HOST=${email_host}
+      - EMAIL_USERNAME=${email_username}
+      - EMAIL_FROM=${email_from}
+      - EMAIL_PASSWORD=${email_password}
+      - ADMIN_JAVA_OPTS=${compreface_admin_java_options}
+      - MAX_FILE_SIZE=${max_file_size}
+      - MAX_REQUEST_SIZE=${max_request_size}B
+    networks: [nvr_net]
+    depends_on:
+      - compreface-postgres-db
+      - compreface-api
+
+  compreface-api:
+    restart: always
+    image: ${registry}compreface-api:${API_VERSION}
+    container_name: "compreface-api"
+    networks: [nvr_net]
+    depends_on:
+      - compreface-postgres-db
+    healthcheck:                        # <— helpful
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8000/api/v1/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    environment:
+      - POSTGRES_USER=${postgres_username}
+      - POSTGRES_PASSWORD=${postgres_password}
+      - POSTGRES_URL=jdbc:postgresql://compreface-postgres-db:5432/${postgres_db}  # <— set service name
+      - SPRING_PROFILES_ACTIVE=dev
+      - API_JAVA_OPTS=${compreface_api_java_options}
+      - SAVE_IMAGES_TO_DB=${save_images_to_db}
+      - MAX_FILE_SIZE=${max_file_size}
+      - MAX_REQUEST_SIZE=${max_request_size}B
+      - CONNECTION_TIMEOUT=${connection_timeout:-10000}
+      - READ_TIMEOUT=${read_timeout:-60000}
+
+  compreface-fe:
+    restart: always
+    image: ${registry}compreface-fe:${FE_VERSION}
+    container_name: "compreface-ui"
+    networks: [nvr_net]
+    ports:
+      - "8000:80"
+    depends_on:
+      - compreface-api
+      - compreface-admin
+    environment:
+      - CLIENT_MAX_BODY_SIZE=${max_request_size}
+      - PROXY_READ_TIMEOUT=${read_timeout:-60000}ms
+      - PROXY_CONNECT_TIMEOUT=${connection_timeout:-10000}ms
+
+  compreface-core:
+    restart: always
+    image: ${registry}compreface-core:${CORE_VERSION}
+    container_name: "compreface-core"
+    networks: [nvr_net]
+    environment:
+      - ML_PORT=3000
+      - UWSGI_PROCESSES=${uwsgi_processes:-2}
+      - UWSGI_THREADS=${uwsgi_threads:-1}
+
+  # Hybrid Erik Tracker - Combines OSNet + Face Recognition
+  hybrid-erik-tracker:
+    build:
+      context: .
+      dockerfile: Dockerfile.hybrid-tracker
+    container_name: "hybrid-erik-tracker"
+    networks: [nvr_net]
+    volumes:
+      - ./erik_images:/app/erik_images:ro
+      - ./tracker_logs:/app/logs
+    environment:
+      # MQTT Configuration
+      - MQTT_HOST=mosquitto
+      - MQTT_PORT=1883
+      
+      # Frigate Integration
+      - FRIGATE_URL=http://frigate:5000
+      
+      # OSNet Configuration (from your test results)
+      - OSNET_THRESHOLD=0.484
+      - OSNET_WEIGHT=0.5
+      
+      # Face Recognition Configuration
+      - ENABLE_FACE_RECOGNITION=true
+      - FACE_API_URL=http://double-take:3000/api/recognize
+      - FACE_THRESHOLD=0.75
+      - FACE_WEIGHT=0.3
+      
+      # Color Tracking Configuration
+      - ENABLE_COLOR_TRACKING=true
+      - COLOR_WEIGHT=0.2
+      - COLOR_CONFIDENCE_THRESHOLD=0.6
+      - COLOR_TOLERANCE=15
+      
+      # Erik Reference Images
+      - ERIK_IMAGES_FOLDER=/app/erik_images
+      
+      # Detection Settings
+      - DETECTION_COOLDOWN=5
+    depends_on:
+      - mosquitto
+      - frigate
+      - double-take
+      - compreface-api
+    restart: unless-stopped
+
+  # Erik Image Manager - Web interface for managing Erik's reference images
+  erik-image-manager:
+    build:
+      context: .
+      dockerfile: Dockerfile.image-manager
+    container_name: "erik-image-manager"
+    networks: [nvr_net]
+    ports:
+      - "9000:9000"
+    volumes:
+      - ./erik_images:/app/erik_images
+      - ./frigate/config:/app/frigate_config
+      - ./meshes:/app/meshes
+      - /home/andrew/nvr/reconstruction:/app/colmap_projects
+    environment:
+      - ERIK_IMAGES_FOLDER=/app/erik_images
+      - MESH_FOLDER=/app/meshes
+      - FRIGATE_CONFIG_PATH=/app/frigate_config/config.yaml
+      - FRIGATE_CONFIG_BACKUP_PATH=/app/frigate_config/backup_config.yaml
+      - FLASK_ENV=production
+    restart: unless-stopped
+
+  # Camera Web Interface Proxy
+  # Forwards camera web interfaces to accessible ports
+  camera-proxy:
+    image: nginx:alpine
+    container_name: "camera-proxy"
+    ports:
+      - "8101:8101"  # Front Door Camera
+      - "8102:8102"  # Backyard Camera
+      - "8103:8103"  # Side Yard Camera
+      - "8104:8104"  # Garage Camera
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks: [nvr_net]
+    restart: unless-stopped
+
+  yard-map:
+    build: ./yard-map
+    container_name: "yard-map"
+    ports:
+      - "8080:8080"
+    networks: [nvr_net]
+    depends_on:
+      - mosquitto
+      - frigate
+      - double-take
+      - hybrid-erik-tracker
+    restart: unless-stopped
+    environment:
+      - MQTT_HOST=mosquitto
+      - FRIGATE_URL=http://frigate:5000
+      - DOUBLE_TAKE_URL=http://double-take:3000
+      - HYBRID_TRACKER_URL=http://hybrid-erik-tracker:8080
+      - IMAGE_MANAGER_URL=http://erik-image-manager:9000

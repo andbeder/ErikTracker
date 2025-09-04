@@ -1,0 +1,117 @@
+# Environment files
+.env
+dev-config.env
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+compreface/pgdata/
+
+# Virtual environments
+venv/
+dev-venv/
+compatibility_venv/
+mesh_venv/
+osnet_venv/
+sg-venv/
+ENV/
+env/
+.venv
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+frigate-logs.txt
+frigate_logs.txt
+image_manager_debug.log
+
+# Temporary and cache files
+*.tmp
+*.temp
+.cache/
+.pytest_cache/
+
+# Media and data directories
+erik_images/
+matthew_images/
+meshes/
+uploaded_videos/
+hls_streams/
+
+# Generated maps and outputs
+*.png
+*.jpg
+*.jpeg
+active_yard_map.json
+yard_map.png
+filtered_yard_map.png
+
+# Configuration files (keep examples)
+global_settings.json
+yard_config_example.json
+
+# Docker and container files
+docker-compose.override.yml
+
+# Project-specific working directories
+colmap_projects/
+reconstruction/
+yard-map/
+
+# External dependencies and models
+*.pth
+cookies.txt
+
+# Documentation and guides (working files)
+*.md
+!README.md
+!readme.md
+
+# Third-party integrations
+frigate/
+double-take/
+homeassistant/
+mosquitto/
+nginx/
+
+# Templates and plans (working directories)
+templates/
+plans/
+guides/

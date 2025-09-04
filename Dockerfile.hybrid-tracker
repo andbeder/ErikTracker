@@ -1,0 +1,47 @@
+# Hybrid Erik Tracker Dockerfile
+FROM python:3.11-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    libopencv-dev \
+    python3-opencv \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
+    libgcc-s1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirements first (for better caching)
+COPY requirements-hybrid.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements-hybrid.txt
+
+# Copy application code
+COPY hybrid_erik_tracker.py .
+
+# Create directories for Erik images and logs
+RUN mkdir -p /app/erik_images /app/logs
+
+# Set environment variables
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+
+# Create non-root user
+RUN useradd -m -u 1000 tracker && chown -R tracker:tracker /app
+USER tracker
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD python -c "import requests; requests.get('http://localhost:8080/health', timeout=5)" || exit 1
+
+# Expose port for health checks (optional)
+EXPOSE 8080
+
+# Run the hybrid tracker
+CMD ["python", "hybrid_erik_tracker.py"]

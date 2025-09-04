@@ -1,0 +1,606 @@
+/* ==========================================================================
+   COLMAP.CSS - COLMAP Reconstruction Styles
+   ========================================================================== */
+
+/* ==========================================================================
+   MODEL SELECTION & MANAGEMENT
+   ========================================================================== */
+
+.model-selection-container {
+    margin-top: 20px;
+    padding: 20px;
+    background: #f8f9fa;
+    border-radius: 10px;
+    border: 1px solid #e9ecef;
+}
+
+.model-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.model-list {
+    display: grid;
+    gap: 12px;
+}
+
+.model-card {
+    background: white;
+    border: 2px solid #dee2e6;
+    border-radius: 8px;
+    padding: 16px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    position: relative;
+}
+
+.model-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    border-color: #4facfe;
+}
+
+.model-card.selected {
+    border-color: #28a745;
+    background: linear-gradient(135deg, #d4edda 0%, #f8fff8 100%);
+}
+
+.model-card.best {
+    border-color: #ffc107;
+    background: linear-gradient(135deg, #fff3cd 0%, #fffff8 100%);
+}
+
+.model-card.best::before {
+    content: "🏆 RECOMMENDED";
+    position: absolute;
+    top: -8px;
+    right: 12px;
+    background: #ffc107;
+    color: #212529;
+    padding: 4px 8px;
+    font-size: 10px;
+    font-weight: bold;
+    border-radius: 4px;
+    letter-spacing: 0.5px;
+}
+
+.model-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.model-id {
+    font-weight: bold;
+    font-size: 16px;
+    color: #333;
+}
+
+.model-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.model-stat {
+    text-align: center;
+}
+
+.model-stat-value {
+    font-weight: bold;
+    font-size: 16px;
+    color: #333;
+    display: block;
+}
+
+.model-stat-label {
+    font-size: 11px;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.model-error {
+    color: #666;
+    font-style: italic;
+    text-align: center;
+    padding: 20px;
+}
+
+/* ==========================================================================
+   RECONSTRUCTION WORKFLOW
+   ========================================================================== */
+
+.processing-workflow {
+    display: flex;
+    flex-direction: column;
+    gap: 25px;
+}
+
+.workflow-step {
+    background: #fff;
+    border-radius: 10px;
+    padding: 20px;
+    border-left: 4px solid #28a745;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+.workflow-step h4 {
+    color: #333;
+    margin-bottom: 10px;
+    font-size: 1.1em;
+}
+
+.workflow-step p {
+    color: #666;
+    margin-bottom: 15px;
+    line-height: 1.5;
+}
+
+/* ==========================================================================
+   POSE RECOGNITION & CALIBRATION
+   ========================================================================== */
+
+.pose-recognition-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 20px;
+    margin-top: 20px;
+}
+
+.pose-camera-card {
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    border: 2px solid #e0e0e0;
+    transition: all 0.3s ease;
+}
+
+.pose-camera-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+    border-color: #4facfe;
+}
+
+.pose-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.pose-header h4 {
+    margin: 0;
+    color: #333;
+    font-size: 1.2em;
+}
+
+.pose-details {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+/* ==========================================================================
+   SYSTEM STATUS & MONITORING
+   ========================================================================== */
+
+.system-status-section {
+    background: #f8f9fa;
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 30px;
+    border: 1px solid #e9ecef;
+}
+
+.status-bar {
+    background: white;
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 15px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.status-bar-title {
+    margin: 0 0 15px 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #333;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.status-lights {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+}
+
+.status-light {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    min-width: 80px;
+}
+
+.status-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: #666;
+    text-align: center;
+}
+
+.status-actions {
+    text-align: right;
+    margin-top: 15px;
+}
+
+/* ==========================================================================
+   MATCHING & TRACKING RESULTS
+   ========================================================================== */
+
+.match-card {
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+    transition: all 0.3s ease;
+    border-left: 4px solid #4facfe;
+    margin-bottom: 20px;
+}
+
+.match-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+}
+
+.match-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.match-camera {
+    font-weight: bold;
+    color: #333;
+    font-size: 1.1em;
+}
+
+.match-time {
+    color: #666;
+    font-size: 0.9em;
+}
+
+.match-details {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+    margin-bottom: 15px;
+}
+
+.match-detail-item {
+    background: #f8f9fa;
+    padding: 10px;
+    border-radius: 8px;
+    text-align: center;
+}
+
+.match-detail-label {
+    font-size: 0.8em;
+    color: #666;
+    display: block;
+    margin-bottom: 5px;
+}
+
+.match-detail-value {
+    font-size: 1.1em;
+    font-weight: bold;
+    color: #333;
+}
+
+.matches-stats {
+    display: flex;
+    justify-content: center;
+    gap: 30px;
+    margin-bottom: 30px;
+    flex-wrap: wrap;
+}
+
+.matches-stat-item {
+    background: linear-gradient(135deg, #17a2b8 0%, #138496 100%);
+    color: white;
+    padding: 15px 25px;
+    border-radius: 10px;
+    text-align: center;
+    box-shadow: 0 4px 15px rgba(23, 162, 184, 0.3);
+}
+
+.auto-refresh {
+    color: #666;
+    font-size: 0.9em;
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+/* ==========================================================================
+   CONFIGURATION MANAGEMENT
+   ========================================================================== */
+
+.config-sections {
+    display: flex;
+    flex-direction: column;
+    gap: 40px;
+}
+
+.config-section {
+    background: #f8f9fa;
+    border-radius: 15px;
+    padding: 25px;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    gap: 15px;
+}
+
+.section-title {
+    color: #333;
+    margin: 0;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #dee2e6;
+    font-size: 1.4em;
+    flex: 1;
+}
+
+.config-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 20px;
+}
+
+.config-item {
+    background: white;
+    border-radius: 10px;
+    padding: 20px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    border: 1px solid #e0e0e0;
+    transition: all 0.3s ease;
+}
+
+.config-item:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+}
+
+.config-item h4 {
+    color: #333;
+    margin: 0 0 15px 0;
+    font-size: 1.1em;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.config-details {
+    margin-bottom: 15px;
+}
+
+.detail-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.detail-item:last-child {
+    border-bottom: none;
+}
+
+.detail-label {
+    font-weight: 600;
+    color: #666;
+    font-size: 0.9em;
+}
+
+.detail-value {
+    color: #333;
+    font-size: 0.9em;
+    text-align: right;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ==========================================================================
+   CAMERA MANAGEMENT
+   ========================================================================== */
+
+.camera-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+    gap: 20px;
+}
+
+.camera-card {
+    background: white;
+    border-radius: 10px;
+    padding: 20px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    border: 1px solid #e0e0e0;
+    transition: all 0.3s ease;
+}
+
+.camera-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+}
+
+.camera-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.camera-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.camera-header h4 {
+    color: #333;
+    margin: 0;
+    font-size: 1.2em;
+}
+
+.camera-details {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.camera-stream iframe {
+    border-radius: 8px;
+    background: #000;
+    display: block;
+}
+
+.camera-stream {
+    text-align: center;
+}
+
+/* ==========================================================================
+   FRIGATE CONFIGURATION
+   ========================================================================== */
+
+.frigate-config-header {
+    text-align: center;
+    margin-bottom: 30px;
+    padding-bottom: 20px;
+    border-bottom: 2px solid #eee;
+}
+
+.config-actions {
+    display: flex;
+    justify-content: center;
+    gap: 15px;
+    margin-top: 20px;
+    flex-wrap: wrap;
+}
+
+/* ==========================================================================
+   MOBILE RESPONSIVE ADJUSTMENTS
+   ========================================================================== */
+
+@media (max-width: 768px) {
+    .pose-recognition-grid {
+        grid-template-columns: 1fr;
+        gap: 15px;
+    }
+    
+    .camera-grid {
+        grid-template-columns: 1fr;
+        gap: 15px;
+    }
+    
+    .config-grid {
+        grid-template-columns: 1fr;
+        gap: 15px;
+    }
+    
+    .model-stats {
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+    }
+    
+    .match-details {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+    
+    .matches-stats {
+        gap: 15px;
+    }
+    
+    .matches-stat-item {
+        padding: 10px 20px;
+        font-size: 14px;
+    }
+    
+    .section-header {
+        flex-direction: column;
+        gap: 15px;
+        text-align: center;
+    }
+    
+    .section-title {
+        font-size: 1.2em;
+    }
+    
+    .status-lights {
+        gap: 15px;
+        justify-content: center;
+    }
+    
+    .pose-camera-card {
+        padding: 15px;
+    }
+    
+    .camera-card {
+        padding: 15px;
+    }
+    
+    .config-item {
+        padding: 15px;
+    }
+}
+
+@media (max-width: 480px) {
+    .model-stats {
+        grid-template-columns: 1fr;
+        gap: 8px;
+    }
+    
+    .workflow-step {
+        padding: 15px;
+    }
+    
+    .match-card {
+        padding: 15px;
+    }
+    
+    .status-lights {
+        gap: 10px;
+    }
+    
+    .status-light {
+        min-width: 60px;
+    }
+    
+    .matches-stat-item {
+        padding: 8px 15px;
+        font-size: 12px;
+    }
+    
+    .section-title {
+        font-size: 1.1em;
+    }
+}

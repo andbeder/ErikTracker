@@ -1,0 +1,32 @@
+# Hybrid Erik Tracker Requirements
+
+# PyTorch and TorchReID
+torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0
+torchreid==0.2.5
+
+# Computer Vision
+opencv-python==4.12.0.88
+Pillow>=10.0.0
+
+# Scientific Computing
+numpy>=1.24.0
+scipy>=1.10.0
+
+# MQTT and Networking
+paho-mqtt>=1.6.0
+requests>=2.31.0
+
+# Data handling
+matplotlib>=3.7.0
+
+# Additional dependencies that TorchReID might need
+gdown>=4.7.0
+h5py>=3.9.0
+cython>=3.0.0
+tensorboard>=2.13.0
+
+# Utilities
+python-dateutil>=2.8.0
+pytz>=2023.3
