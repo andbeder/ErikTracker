@@ -306,7 +306,7 @@ class ApiClient {
      * Get available mesh files
      */
     async getMeshes() {
-        return this.get('/api/meshes');
+        return this.get('/api/yard-map/mesh-files');
     }
 
     // === CAMERA API ===

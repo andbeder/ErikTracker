@@ -6,6 +6,7 @@ Handles mesh processing and yard map generation
 import os
 import json
 import base64
+from datetime import datetime
 from flask import Blueprint, request, jsonify, current_app, send_from_directory, Response
 
 bp = Blueprint('yard_map', __name__, url_prefix='/api/yard-map')
@@ -98,9 +99,13 @@ def generate_yard_map():
             # Standard yard map parameters
             max_points = data.get('max_points', 50000)
             point_size = data.get('point_size', 0.1)
+            algorithm = data.get('algorithm', 'kmeans')
+            custom_bounds = data.get('custom_bounds')
+            height_window = data.get('height_window', 0.5)
+            rotation = data.get('rotation', 0)
             
             image_data, log_output = yard_service.generate_yard_map(
-                mesh_path, grid_resolution, max_points, point_size, projection
+                mesh_path, grid_resolution, max_points, point_size, projection, algorithm, custom_bounds, height_window, rotation
             )
         
         if image_data:
@@ -175,7 +180,24 @@ def use_yard_map():
         metadata = {
             'source': 'generated',
             'parameters': parameters,
-            'generated_at': '2024-01-01T00:00:00Z'  # Would use actual timestamp
+            'generated_at': datetime.now().isoformat(),
+            
+            # Extract map bounds from parameters for Erik positioning
+            'map_bounds': {
+                'x_min': parameters.get('custom_bounds', [None]*4)[0] if parameters.get('custom_bounds') and len(parameters.get('custom_bounds', [])) >= 4 else None,
+                'x_max': parameters.get('custom_bounds', [None]*4)[1] if parameters.get('custom_bounds') and len(parameters.get('custom_bounds', [])) >= 4 else None,
+                'y_min': parameters.get('custom_bounds', [None]*4)[2] if parameters.get('custom_bounds') and len(parameters.get('custom_bounds', [])) >= 4 else None,
+                'y_max': parameters.get('custom_bounds', [None]*4)[3] if parameters.get('custom_bounds') and len(parameters.get('custom_bounds', [])) >= 4 else None,
+                'center_x': parameters.get('center_x'),
+                'center_y': parameters.get('center_y'),
+                'scale_meters_per_pixel': parameters.get('scale_meters_per_pixel'),
+                'rotation_degrees': parameters.get('rotation', 0),
+                'projection': parameters.get('projection', 'xy')
+            },
+            
+            # Image dimensions (standard for yard maps)
+            'image_width': 1280,
+            'image_height': 720
         }
         
         # Save as active map

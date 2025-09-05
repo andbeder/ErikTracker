@@ -15,10 +15,14 @@ class YardMapManager {
         this.originalMapBounds = null;
         this.firstGenerationBounds = null;
         this.currentMapData = null;
+        this.currentMapImageData = null;  // Store the actual image data
         this.isDragging = false;
         this.isRightDragging = false;
         this.lastMouseX = 0;
         this.lastMouseY = 0;
+        
+        // Camera overlay system
+        this.cameraOverlay = null;
         
         this.initializeEventListeners();
     }
@@ -33,7 +37,11 @@ class YardMapManager {
         // ESC key functionality for map controls
         document.addEventListener('keydown', (e) => {
             const mapContainer = document.getElementById('mapContainer');
-            if (!mapContainer || !mapContainer.matches(':hover')) return;
+            const savedMapContainer = document.getElementById('savedMapThumbnail');
+            const isOverMap = (mapContainer && mapContainer.matches(':hover')) || 
+                             (savedMapContainer && savedMapContainer.matches(':hover'));
+            
+            if (!isOverMap) return;
             
             if (e.key === 'r' || e.key === 'R') {
                 e.preventDefault();
@@ -48,6 +56,7 @@ class YardMapManager {
             } else if (e.key === 'Escape') {
                 this.resetMapTransform();
             }
+            
         });
     }
 
@@ -82,6 +91,12 @@ class YardMapManager {
         
         if (!keepRotation) {
             Utils.safeElementOperation('rotation', el => el.value = '0');
+        }
+        
+        // Reset scale field to original value when zoom is reset
+        const scaleInput = document.getElementById('scaleMetersPerPixel');
+        if (scaleInput && scaleInput.dataset.originalScale) {
+            scaleInput.value = scaleInput.dataset.originalScale;
         }
     }
 
@@ -213,11 +228,39 @@ class YardMapManager {
         // Update rotation field
         Utils.safeElementOperation('rotation', el => el.value = this.mapTransform.rotation.toFixed(1));
         
+        // Update scale field based on zoom level
+        this.updateScaleFromZoom();
+        
         // Update view window fields
         this.updateViewWindowFromTransform();
         
         // Display fixed resolution
         Utils.safeElementOperation('mapSizeDisplay', el => el.textContent = '1280 × 720 pixels (16:9)');
+    }
+
+    /**
+     * Update the scale field based on current zoom level
+     */
+    updateScaleFromZoom() {
+        const scaleInput = document.getElementById('scaleMetersPerPixel');
+        if (!scaleInput || !scaleInput.value) return; // Only update if scale field has a value
+        
+        // Get the original scale value (before zoom)
+        const originalScale = parseFloat(scaleInput.dataset.originalScale || scaleInput.value);
+        if (isNaN(originalScale)) return;
+        
+        // Store original scale for future reference if not already stored
+        if (!scaleInput.dataset.originalScale) {
+            scaleInput.dataset.originalScale = originalScale.toString();
+        }
+        
+        // Calculate effective scale based on zoom level
+        // When zoomed in (scale > 1), each pixel represents less area (smaller m/px value)
+        // When zoomed out (scale < 1), each pixel represents more area (larger m/px value)
+        const effectiveScale = originalScale / this.mapTransform.scale;
+        
+        // Update the scale field
+        scaleInput.value = effectiveScale.toFixed(4);
     }
 
     /**
@@ -310,12 +353,22 @@ class YardMapManager {
      * Scan mesh boundaries
      */
     async scanBoundaries() {
-        const meshFile = 'current_reconstruction/dense/fused.ply';
-        const projection = document.getElementById('projection')?.value || 'xy';
+        // Use the available point cloud file
+        const meshFile = 'yard_reconstruction.ply';
+        const projectionValue = document.getElementById('projection')?.value || 'top_down';
         
-        // Check if dense reconstruction is complete
-        if (!window.colmapManager?.processingState?.denseReconstruction) {
-            alert('Dense reconstruction must be completed first. Please complete the reconstruction pipeline.');
+        // Map frontend values to backend values
+        const projectionMap = {
+            'top_down': 'xy',
+            'side_view': 'xz',
+            'front_view': 'yz'
+        };
+        const projection = projectionMap[projectionValue] || 'xy';
+        
+        // Check if point cloud is available
+        const hasPointCloud = await window.colmapManager?.checkPointCloudAvailable();
+        if (!hasPointCloud) {
+            alert('Point cloud must be available first. Please complete the reconstruction pipeline or enable point cloud.');
             return;
         }
         
@@ -328,7 +381,7 @@ class YardMapManager {
         try {
             const data = await this.api.scanBounds(meshFile, projection);
             
-            if (data.success) {
+            if (data.status === 'success' && data.bounds) {
                 // Update axis labels based on projection
                 this.updateAxisLabels(data.bounds.axis1_label, data.bounds.axis2_label);
                 
@@ -349,7 +402,7 @@ class YardMapManager {
                 Utils.safeElementOperation('scaleMetersPerPixel', el => el.value = scale.toFixed(4));
                 
                 // Enable Generate Map button
-                Utils.safeElementOperation('generateBtn', el => el.disabled = false);
+                Utils.safeElementOperation('generateMapBtn', el => el.disabled = false);
                 
                 if (scanBtn) {
                     scanBtn.textContent = '✅ Boundaries Set';
@@ -374,26 +427,38 @@ class YardMapManager {
      * Generate yard map
      */
     async generateYardMap() {
-        const meshFile = 'current_reconstruction/dense/fused.ply';
+        // Use the available point cloud file
+        const meshFile = 'yard_reconstruction.ply';
         
-        // Check if dense reconstruction is complete
-        if (!window.colmapManager?.processingState?.denseReconstruction) {
-            alert('Dense reconstruction must be completed first. Please complete the reconstruction pipeline.');
+        // Check if point cloud is available
+        const hasPointCloud = await window.colmapManager?.checkPointCloudAvailable();
+        if (!hasPointCloud) {
+            alert('Point cloud must be available first. Please complete the reconstruction pipeline or enable point cloud.');
             return;
         }
         
         const rotation = parseFloat(document.getElementById('rotation')?.value) || 0;
+        const projectionValue = document.getElementById('projection')?.value || 'top_down';
+        const algorithm = document.getElementById('algorithm')?.value || 'kmeans';
+        
+        // Map frontend values to backend values
+        const projectionMap = {
+            'top_down': 'xy',
+            'side_view': 'xz',
+            'front_view': 'yz'
+        };
+        const projection = projectionMap[projectionValue] || 'xy';
         
         const config = {
             mesh_file: meshFile,
+            type: 'standard',  // Use standard method due to raster performance issues
             grid_resolution: parseFloat(document.getElementById('gridResolution')?.value) || 0.1,
-            max_points: 20000000,
+            max_points: 50000,
+            point_size: parseFloat(document.getElementById('pointSize')?.value) || 0.1,
+            projection: projection,
+            algorithm: algorithm,
             height_window: parseFloat(document.getElementById('heightWindow')?.value) || 0.5,
-            coloring: document.getElementById('coloring')?.value || 'true_color',
-            projection: document.getElementById('projection')?.value || 'xy',
-            rotation: rotation,
-            output_width: 1280,
-            output_height: 720
+            rotation: rotation
         };
         
         // Get view window parameters
@@ -426,10 +491,10 @@ class YardMapManager {
         this.currentMapData = config;
         
         // Show loading indicator
-        Utils.safeElementOperation('loadingIndicator', el => el.style.display = 'block');
+        Utils.safeElementOperation('yardMapProgress', el => el.style.display = 'block');
         Utils.safeElementOperation('mapDisplay', el => el.style.display = 'none');
         Utils.safeElementOperation('errorDisplay', el => el.style.display = 'none');
-        Utils.safeElementOperation('generateBtn', el => el.disabled = true);
+        Utils.safeElementOperation('generateMapBtn', el => el.disabled = true);
         Utils.safeElementOperation('useMapBtn', el => el.style.display = 'none');
         Utils.safeElementOperation('downloadBtn', el => el.style.display = 'none');
         
@@ -438,10 +503,12 @@ class YardMapManager {
         
         let progress = 0;
         const progressBar = document.getElementById('progressBar');
+        const progressPercentage = document.getElementById('progressPercentage');
         const progressInterval = setInterval(() => {
             progress += 2;
-            if (progress <= 90 && progressBar) {
-                progressBar.style.width = progress + '%';
+            if (progress <= 90) {
+                if (progressBar) progressBar.style.width = progress + '%';
+                if (progressPercentage) progressPercentage.textContent = progress + '%';
             }
         }, 1000);
         
@@ -450,21 +517,29 @@ class YardMapManager {
             
             clearInterval(progressInterval);
             if (progressBar) progressBar.style.width = '100%';
+            if (progressPercentage) progressPercentage.textContent = '100%';
             
             setTimeout(() => {
-                Utils.safeElementOperation('loadingIndicator', el => el.style.display = 'none');
-                Utils.safeElementOperation('generateBtn', el => el.disabled = false);
+                Utils.safeElementOperation('yardMapProgress', el => el.style.display = 'none');
+                Utils.safeElementOperation('generateMapBtn', el => el.disabled = false);
                 
                 if (data.status === 'success') {
+                    // Store the image data for later use
+                    this.currentMapImageData = data.image_data;
+                    
                     // Reset transform but keep rotation
                     this.resetMapTransform(true);
                     
                     // Display map
                     const mapImage = document.getElementById('mapImage');
                     if (mapImage) {
-                        mapImage.src = data.image;
-                        const fitToScreen = document.getElementById('fitToScreen')?.checked;
-                        mapImage.style.width = fitToScreen ? '100%' : 'auto';
+                        mapImage.src = `data:image/png;base64,${data.image_data}`;
+                        mapImage.style.width = '100%';
+                        
+                        // Camera overlay disabled - pose validation now done in reconstruction tab
+                        // mapImage.onload = () => {
+                        //     this.initializeCameraOverlay(data.parameters);
+                        // };
                     }
                     
                     // Update info display
@@ -506,12 +581,9 @@ class YardMapManager {
                         }
                     }
                     
-                    // Show log if available
-                    if (data.log) {
-                        Utils.safeElementOperation('mapLog', el => {
-                            el.textContent = data.log;
-                            el.style.display = 'block';
-                        });
+                    // Show log if available (log_output from raster API)
+                    if (data.log_output) {
+                        console.log('Map generation log:', data.log_output);
                     }
                     
                     // Show controls and buttons
@@ -538,11 +610,64 @@ class YardMapManager {
             
         } catch (error) {
             clearInterval(progressInterval);
-            Utils.safeElementOperation('loadingIndicator', el => el.style.display = 'none');
-            Utils.safeElementOperation('generateBtn', el => el.disabled = false);
+            Utils.safeElementOperation('yardMapProgress', el => el.style.display = 'none');
+            Utils.safeElementOperation('generateMapBtn', el => el.disabled = false);
             Utils.safeElementOperation('errorMessage', el => el.textContent = 'Network error: ' + error.message);
             Utils.safeElementOperation('errorDisplay', el => el.style.display = 'block');
             console.error('Error generating yard map:', error);
+        }
+    }
+    
+    /**
+     * Initialize camera overlay system
+     */
+    async initializeCameraOverlay(mapParameters) {
+        // Camera overlay disabled - pose validation now done in reconstruction tab
+        console.info('Camera overlay disabled - use reconstruction tab for pose validation');
+        return;
+        
+        try {
+            // Get the map container 
+            const mapContainer = document.getElementById('mapContainer');
+            if (!mapContainer) {
+                console.warn('Map container not found for camera overlay');
+                return;
+            }
+            
+            // Create mock metadata from map parameters for now
+            // TODO: This will be replaced with actual saved map metadata
+            const mapMetadata = {
+                map_bounds: {
+                    x_min: mapParameters.custom_bounds?.[0],
+                    x_max: mapParameters.custom_bounds?.[1], 
+                    y_min: mapParameters.custom_bounds?.[2],
+                    y_max: mapParameters.custom_bounds?.[3],
+                    center_x: parseFloat(document.getElementById('xCenter')?.value),
+                    center_y: parseFloat(document.getElementById('yCenter')?.value),
+                    scale_meters_per_pixel: parseFloat(document.getElementById('scaleMetersPerPixel')?.value),
+                    rotation_degrees: parseFloat(document.getElementById('rotation')?.value) || 0,
+                    projection: mapParameters.projection || 'xy'
+                },
+                image_width: 1280,
+                image_height: 720
+            };
+            
+            // Cleanup existing overlay
+            if (this.cameraOverlay) {
+                this.cameraOverlay.destroy();
+            }
+            
+            // Initialize new overlay
+            this.cameraOverlay = new CameraOverlay();
+            await this.cameraOverlay.initialize(mapContainer, mapMetadata);
+            
+            // Update camera controls
+            await this.updateCameraOverlayControls();
+            
+            console.log('Camera overlay initialized successfully');
+            
+        } catch (error) {
+            console.error('Error initializing camera overlay:', error);
         }
     }
 
@@ -550,7 +675,7 @@ class YardMapManager {
      * Use yard map as active
      */
     async useYardMap() {
-        if (!this.currentMapData) {
+        if (!this.currentMapData || !this.currentMapImageData) {
             alert('Please generate a map first');
             return;
         }
@@ -565,7 +690,27 @@ class YardMapManager {
         }
         
         try {
-            const data = await this.api.useYardMap(this.currentMapData);
+            // Enhance currentMapData with current form values and positioning metadata
+            const enhancedMapData = Utils.deepClone(this.currentMapData);
+            
+            // Add current positioning values
+            const xCenter = parseFloat(document.getElementById('xCenter')?.value);
+            const yCenter = parseFloat(document.getElementById('yCenter')?.value);
+            const scale = parseFloat(document.getElementById('scaleMetersPerPixel')?.value);
+            const rotation = parseFloat(document.getElementById('rotation')?.value) || 0;
+            
+            enhancedMapData.center_x = xCenter;
+            enhancedMapData.center_y = yCenter;
+            enhancedMapData.scale_meters_per_pixel = scale;
+            enhancedMapData.rotation = rotation;
+            
+            // Create the request payload in the format expected by the API
+            const requestPayload = {
+                image_data: this.currentMapImageData,  // The base64 image data
+                parameters: enhancedMapData  // All the map parameters
+            };
+            
+            const data = await this.api.useYardMap(requestPayload);
             
             if (data.status === 'success') {
                 if (statusEl) {
@@ -596,6 +741,186 @@ class YardMapManager {
         } finally {
             if (useBtn) useBtn.disabled = false;
         }
+    }
+    
+    /**
+     * Load saved map thumbnail from API
+     */
+    async loadSavedMapThumbnailFromAPI() {
+        try {
+            const response = await fetch('/api/yard-map/active-map/image?t=' + Date.now());
+            if (response.ok) {
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+                
+                this.updateSavedMapThumbnail(url);
+                
+                // Camera overlay disabled - pose validation now done in reconstruction tab
+                // await this.initializeCameraOverlayForSavedMap();
+            } else {
+                // No saved map available
+                Utils.safeElementOperation('savedMapThumbnail', el => el.style.display = 'none');
+                Utils.safeElementOperation('noSavedMapThumbnail', el => el.style.display = 'block');
+            }
+        } catch (error) {
+            console.error('Error loading saved map thumbnail:', error);
+            Utils.safeElementOperation('savedMapThumbnail', el => el.style.display = 'none');
+            Utils.safeElementOperation('noSavedMapThumbnail', el => el.style.display = 'block');
+        }
+    }
+    
+    /**
+     * Initialize camera overlay for saved map using stored metadata
+     */
+    async initializeCameraOverlayForSavedMap() {
+        // Camera overlay disabled - pose validation now done in reconstruction tab
+        console.info('Camera overlay for saved map disabled - use reconstruction tab for pose validation');
+        return;
+        
+        try {
+            // Get saved map metadata
+            const response = await fetch('/api/yard-map/active-map/info');
+            if (!response.ok) return;
+            
+            const metadata = await response.json();
+            if (!metadata.map_bounds) return;
+            
+            // Get the saved map container
+            const savedMapImage = document.getElementById('savedMapImage');
+            if (!savedMapImage || !savedMapImage.parentElement) return;
+            
+            // Create container with relative positioning for overlay
+            const container = savedMapImage.parentElement;
+            container.style.position = 'relative';
+            
+            // Cleanup existing overlay
+            if (this.cameraOverlay) {
+                this.cameraOverlay.destroy();
+            }
+            
+            // Initialize overlay with saved metadata
+            this.cameraOverlay = new CameraOverlay();
+            await this.cameraOverlay.initialize(container, metadata);
+            
+            // Update camera controls
+            await this.updateCameraOverlayControls();
+            
+            console.log('Camera overlay initialized for saved map');
+            
+        } catch (error) {
+            console.error('Error initializing camera overlay for saved map:', error);
+        }
+    }
+    
+    /**
+     * Toggle all camera overlays visibility
+     */
+    toggleAllCameraOverlays() {
+        // Camera overlay disabled - pose validation now done in reconstruction tab
+        console.info('Camera overlay toggle disabled - use reconstruction tab for pose validation');
+        return;
+        
+        if (!this.cameraOverlay) return;
+        
+        const isVisible = this.cameraOverlay.toggleVisibility();
+        const toggleBtn = document.getElementById('toggleAllCameras');
+        
+        if (toggleBtn) {
+            toggleBtn.textContent = isVisible ? '👁️ Hide All' : '👁️ Show All';
+            toggleBtn.style.background = isVisible ? '#dc3545' : '#17a2b8';
+        }
+        
+        // Update individual camera buttons
+        this.updateCameraControlButtons();
+    }
+    
+    /**
+     * Toggle individual camera visibility
+     */
+    toggleCameraOverlay(cameraName) {
+        // Camera overlay disabled - pose validation now done in reconstruction tab
+        console.info('Individual camera overlay toggle disabled - use reconstruction tab for pose validation');
+        return;
+        
+        if (!this.cameraOverlay) return;
+        
+        const isVisible = this.cameraOverlay.toggleCamera(cameraName);
+        const cameraBtn = document.getElementById(`camera-${cameraName}`);
+        
+        if (cameraBtn) {
+            cameraBtn.textContent = isVisible ? '👁️ Hide' : '👁️ Show';
+            cameraBtn.style.background = isVisible ? '#dc3545' : '#28a745';
+        }
+    }
+    
+    /**
+     * Update camera overlay controls
+     */
+    async updateCameraOverlayControls() {
+        // Camera overlay disabled - pose validation now done in reconstruction tab
+        console.info('Camera overlay controls disabled - use reconstruction tab for pose validation');
+        return;
+        
+        if (!this.cameraOverlay) return;
+        
+        const cameraList = document.getElementById('cameraList');
+        const cameraControls = document.getElementById('cameraOverlayControls');
+        
+        if (!cameraList || !cameraControls) return;
+        
+        const cameras = this.cameraOverlay.getCameraList();
+        
+        if (cameras.length === 0) {
+            cameraControls.style.display = 'none';
+            return;
+        }
+        
+        // Show controls
+        cameraControls.style.display = 'block';
+        
+        // Clear existing buttons
+        cameraList.innerHTML = '';
+        
+        // Create buttons for each camera
+        cameras.forEach(camera => {
+            const cameraItem = document.createElement('div');
+            cameraItem.style.cssText = 'display: flex; align-items: center; gap: 8px; padding: 4px; background: white; border-radius: 4px; border: 1px solid #ddd;';
+            
+            const colorIndicator = document.createElement('div');
+            colorIndicator.style.cssText = `width: 12px; height: 12px; background: ${camera.color}; border-radius: 50%; flex-shrink: 0;`;
+            
+            const nameLabel = document.createElement('span');
+            nameLabel.textContent = camera.name;
+            nameLabel.style.cssText = 'font-size: 12px; flex-grow: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
+            
+            const toggleBtn = document.createElement('button');
+            toggleBtn.id = `camera-${camera.name}`;
+            toggleBtn.textContent = camera.visible ? '👁️ Hide' : '👁️ Show';
+            toggleBtn.style.cssText = `background: ${camera.visible ? '#dc3545' : '#28a745'}; color: white; border: none; padding: 2px 6px; border-radius: 3px; cursor: pointer; font-size: 10px; flex-shrink: 0;`;
+            toggleBtn.onclick = () => this.toggleCameraOverlay(camera.name);
+            
+            cameraItem.appendChild(colorIndicator);
+            cameraItem.appendChild(nameLabel);
+            cameraItem.appendChild(toggleBtn);
+            
+            cameraList.appendChild(cameraItem);
+        });
+    }
+    
+    /**
+     * Update camera control buttons based on current visibility
+     */
+    updateCameraControlButtons() {
+        if (!this.cameraOverlay) return;
+        
+        const cameras = this.cameraOverlay.getCameraList();
+        cameras.forEach(camera => {
+            const cameraBtn = document.getElementById(`camera-${camera.name}`);
+            if (cameraBtn) {
+                cameraBtn.textContent = camera.visible ? '👁️ Hide' : '👁️ Show';
+                cameraBtn.style.background = camera.visible ? '#dc3545' : '#28a745';
+            }
+        });
     }
 
     /**
@@ -788,6 +1113,7 @@ class YardMapManager {
         this.resetMapTransform();
         this.originalMapBounds = null;
         this.currentMapData = null;
+        this.currentMapImageData = null;
         
         if (select.value) {
             const option = select.options[select.selectedIndex];
@@ -807,12 +1133,29 @@ class YardMapManager {
 // Global instance
 let yardMapManager;
 
+// Initialize function
+function initializeYardMapManager() {
+    if (window.api && !window.yardMapManager) {
+        yardMapManager = new YardMapManager(window.api);
+        window.yardMapManager = yardMapManager;  // Make it globally accessible
+        console.log('YardMapManager initialized successfully');
+        return true;
+    }
+    return false;
+}
+
+// Make the initialization function globally accessible
+window.initializeYardMapManager = initializeYardMapManager;
+
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
-    if (window.api) {
-        yardMapManager = new YardMapManager(window.api);
-    }
+    initializeYardMapManager();
 });
+
+// Also try to initialize immediately in case DOM is already loaded
+if (document.readyState === 'interactive' || document.readyState === 'complete') {
+    initializeYardMapManager();
+}
 
 // Export for module usage
 if (typeof module !== 'undefined' && module.exports) {

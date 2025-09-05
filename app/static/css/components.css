@@ -738,3 +738,39 @@
     margin: 0;
     opacity: 0.8;
 }
+
+/* ==========================================================================
+   CAMERA MANAGEMENT GRID
+   ========================================================================== */
+
+.camera-management-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 20px;
+    padding: 20px 0;
+}
+
+.camera-management-card {
+    background: #f8f9fa;
+    border-radius: 12px;
+    padding: 20px;
+    border: 1px solid #e0e0e0;
+    position: relative;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.camera-management-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+}
+
+@media (max-width: 768px) {
+    .camera-management-grid {
+        grid-template-columns: 1fr;
+        gap: 15px;
+    }
+    
+    .camera-management-card {
+        padding: 15px;
+    }
+}

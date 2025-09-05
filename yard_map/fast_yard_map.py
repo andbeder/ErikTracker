@@ -51,17 +51,78 @@ def load_mesh_vertices(ply_path, max_points=100000):
     return None, None
 
 
-def create_ground_surface_map(vertices, colors=None, projection='xy', grid_resolution=0.1, height_window=None):
+def create_fast_simple_average_map(vertices, colors=None, projection='xy', grid_resolution=0.1):
+    """Fast simple average using numpy grid operations - much faster than per-cell processing"""
+    
+    # Get 2D projection coordinates
+    vertices_2d = project_to_2d(vertices, projection)
+    
+    # Calculate grid bounds
+    x_min, x_max = vertices_2d[:, 0].min(), vertices_2d[:, 0].max()
+    y_min, y_max = vertices_2d[:, 1].min(), vertices_2d[:, 1].max()
+    
+    # Calculate grid dimensions  
+    x_bins = int(np.ceil((x_max - x_min) / grid_resolution))
+    y_bins = int(np.ceil((y_max - y_min) / grid_resolution))
+    
+    print(f"Fast simple average: {x_bins}x{y_bins} grid = {x_bins * y_bins} cells")
+    
+    # Assign each point to grid cell
+    x_indices = np.floor((vertices_2d[:, 0] - x_min) / grid_resolution).astype(int)
+    y_indices = np.floor((vertices_2d[:, 1] - y_min) / grid_resolution).astype(int)
+    
+    # Clamp indices to valid range
+    x_indices = np.clip(x_indices, 0, x_bins - 1)
+    y_indices = np.clip(y_indices, 0, y_bins - 1)
+    
+    # Convert to linear indices for easy grouping
+    linear_indices = y_indices * x_bins + x_indices
+    
+    # Group points by cell and compute averages
+    ground_vertices = []
+    ground_colors = []
+    
+    for cell_idx in np.unique(linear_indices):
+        mask = linear_indices == cell_idx
+        cell_vertices = vertices[mask]
+        
+        # Average position
+        avg_vertex = np.mean(cell_vertices, axis=0)
+        ground_vertices.append(avg_vertex)
+        
+        # Average color if available
+        if colors is not None:
+            cell_colors = colors[mask]
+            avg_color = np.mean(cell_colors, axis=0)
+            ground_colors.append(avg_color)
+    
+    ground_vertices = np.array(ground_vertices)
+    if colors is not None:
+        ground_colors = np.array(ground_colors)
+    else:
+        ground_colors = None
+        
+    print(f"Fast simple average produced {len(ground_vertices)} grid points")
+    return ground_vertices, ground_colors
+
+
+def create_ground_surface_map(vertices, colors=None, projection='xy', grid_resolution=0.1, height_window=0.5, algorithm='kmeans'):
     """Create ground surface map using cube projection with optimized height filtering.
     
     For each pixel, projects a cube from pixel edges and finds points within.
-    If all points fit within height_window: simple average (fast)
-    If points spread across heights: K-means clustering to separate ground from foliage
+    If algorithm is 'simple_average': always use simple average of all points in cube
+    If algorithm is 'kmeans' (default): If all points fit within height_window: simple average (fast)
+                                       If points spread across heights: K-means clustering to separate ground from foliage
     """
-    print(f"Creating ground surface with cube projection: {grid_resolution}m resolution, height_window: {height_window}m")
+    print(f"Creating ground surface with cube projection: {grid_resolution}m resolution, height_window: {height_window}m, algorithm: {algorithm}")
     
     if vertices.shape[1] < 3:
         return vertices, colors
+    
+    # Fast path for simple average - use numpy grid averaging
+    if algorithm == 'simple_average':
+        print("Using fast simple average algorithm")
+        return create_fast_simple_average_map(vertices, colors, projection, grid_resolution)
     
     # Get 2D projection coordinates (the plane we're viewing)
     vertices_2d = project_to_2d(vertices, projection)
@@ -127,7 +188,10 @@ def create_ground_surface_map(vertices, colors=None, projection='xy', grid_resol
             depth_min, depth_max = cube_depths.min(), cube_depths.max()
             depth_range = depth_max - depth_min
             
-            if height_window is not None and depth_range <= height_window:
+            if algorithm == 'simple_average':
+                # Always use simple average of all points in cube
+                best_cluster = cube_indices
+            elif height_window is not None and depth_range <= height_window:
                 # All points within height window - simple average (fast path)
                 best_cluster = cube_indices
             else:
@@ -188,8 +252,59 @@ def project_to_2d(vertices, projection='xy'):
         raise ValueError(f"Unknown projection: {projection}")
 
 
-def create_yard_map(vertices, colors=None, depth_min=None, depth_max=None, point_size=0.1, colormap='terrain', projection='xy', grid_resolution=0.1, height_window=None):
-    """Create yard map using ground-up projection to show ground surface with true colors."""
+def create_raster_image(x, y, colors, x_min, x_max, y_min, y_max, width, height):
+    """Create a fixed-size raster image from point data"""
+    
+    # Create empty image array (RGB)
+    image = np.ones((height, width, 3), dtype=np.uint8) * 255  # White background
+    
+    # Convert world coordinates to pixel coordinates  
+    pixel_x = ((x - x_min) / (x_max - x_min) * (width - 1)).astype(int)
+    pixel_y = ((y_max - y) / (y_max - y_min) * (height - 1)).astype(int)  # Flip Y axis
+    
+    # Clamp to image bounds
+    pixel_x = np.clip(pixel_x, 0, width - 1)
+    pixel_y = np.clip(pixel_y, 0, height - 1)
+    
+    # Set pixel colors
+    if colors is not None:
+        # Ensure colors are in 0-255 range
+        if colors.max() <= 1.0:
+            colors_uint8 = (colors * 255).astype(np.uint8)
+        else:
+            colors_uint8 = colors.astype(np.uint8)
+            
+        # Set pixels (points may overlap, later points overwrite earlier ones)
+        image[pixel_y, pixel_x] = colors_uint8
+    else:
+        # Use default green color for ground
+        image[pixel_y, pixel_x] = [34, 139, 34]  # Forest green
+    
+    # Create matplotlib figure with exact pixel dimensions
+    dpi = 100
+    fig, ax = plt.subplots(figsize=(width/dpi, height/dpi), dpi=dpi)
+    
+    # Display the raster image
+    ax.imshow(image, extent=[x_min, x_max, y_min, y_max], aspect='equal', origin='lower')
+    ax.set_xlim(x_min, x_max)
+    ax.set_ylim(y_min, y_max)
+    ax.axis('off')  # Remove axes for clean raster output
+    
+    # Remove all margins and padding for exact pixel output
+    plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
+    
+    print(f"Created {width}x{height} raster image with {len(x)} points")
+    return fig, ax
+
+
+def create_yard_map(vertices, colors=None, depth_min=None, depth_max=None, point_size=0.1, colormap='terrain', projection='xy', grid_resolution=0.1, height_window=0.5, algorithm='kmeans', custom_bounds=None, output_width=1280, output_height=720):
+    """Create yard map using ground-up projection to show ground surface with true colors.
+    
+    Args:
+        custom_bounds: [x_min, x_max, y_min, y_max] for fixed view area and scale
+        output_width: Output image width in pixels (default: 1280)  
+        output_height: Output image height in pixels (default: 720)
+    """
     print(f"DEBUG: create_yard_map called with colormap='{colormap}', projection='{projection}'")
     print(f"DEBUG: colors is None: {colors is None}")
     
@@ -204,7 +319,7 @@ def create_yard_map(vertices, colors=None, depth_min=None, depth_max=None, point
     
     # Create cube-projected ground surface: for each pixel, find ground points via height clustering
     # This naturally filters out trees and gives us the ground surface
-    filtered_vertices, filtered_colors = create_ground_surface_map(vertices, colors, projection, grid_resolution, height_window)
+    filtered_vertices, filtered_colors = create_ground_surface_map(vertices, colors, projection, grid_resolution, height_window, algorithm)
     vertices_2d = project_to_2d(filtered_vertices, projection)
     
     # Extract coordinates
@@ -214,51 +329,62 @@ def create_yard_map(vertices, colors=None, depth_min=None, depth_max=None, point
     print(f"Ground surface projection: {len(filtered_vertices)} points")
     print(f"Colors available: {filtered_colors is not None}")
     
-    # Create figure
-    fig, ax = plt.subplots(figsize=(12, 12))
-    
-    # For Erik's position tracking, we prioritize true colors from the mesh
-    if filtered_colors is not None:
-        # Use true colors from mesh - this is the primary goal
-        print(f"Using true colors from ground surface")
-        colors_normalized = filtered_colors / 255.0 if filtered_colors.max() > 1 else filtered_colors
-        scatter = ax.scatter(x, y, c=colors_normalized, s=point_size, alpha=0.8)
-        print("Applied true colors from mesh data")
+    # Use custom bounds if provided, otherwise auto-calculate bounds
+    if custom_bounds is not None:
+        x_min, x_max, y_min, y_max = custom_bounds
+        print(f"Using custom bounds: X=[{x_min:.2f}, {x_max:.2f}], Y=[{y_min:.2f}, {y_max:.2f}]")
+        print(f"Output image: {output_width}x{output_height} pixels")
+        scale_x = (x_max - x_min) / output_width
+        scale_y = (y_max - y_min) / output_height
+        print(f"Scale: {scale_x:.4f} m/px (X), {scale_y:.4f} m/px (Y)")
+        
+        # Create fixed-size raster image
+        fig, ax = create_raster_image(x, y, filtered_colors, x_min, x_max, y_min, y_max, output_width, output_height)
     else:
-        # Fallback to terrain-based coloring if no color data
-        print("No color data available, using terrain-style coloring")
-        if filtered_vertices.shape[1] > 2:
-            if projection == 'xy':
-                height_data = filtered_vertices[:, 2]
-                height_label = 'Ground Height (Z meters)'
-            elif projection == 'xz':
-                height_data = filtered_vertices[:, 1] 
-                height_label = 'Ground Depth (Y meters)'
-            elif projection == 'yz':
-                height_data = filtered_vertices[:, 0]
-                height_label = 'Ground Depth (X meters)'
-            
-            scatter = ax.scatter(x, y, c=height_data, cmap='terrain', s=point_size, alpha=0.8)
-            plt.colorbar(scatter, ax=ax, label=height_label)
+        # Auto-calculate bounds and create matplotlib chart (legacy behavior)
+        fig, ax = plt.subplots(figsize=(12, 12))
+        
+        # For Erik's position tracking, we prioritize true colors from the mesh
+        if filtered_colors is not None:
+            # Use true colors from mesh - this is the primary goal
+            print(f"Using true colors from ground surface")
+            colors_normalized = filtered_colors / 255.0 if filtered_colors.max() > 1 else filtered_colors
+            scatter = ax.scatter(x, y, c=colors_normalized, s=point_size, alpha=0.8)
+            print("Applied true colors from mesh data")
         else:
-            ax.scatter(x, y, s=point_size, alpha=0.8, color='brown')
-    
-    # Set equal aspect and limits
-    ax.set_aspect('equal')
-    
-    # Labels based on projection
-    projection_labels = {
-        'xy': ('X (meters)', 'Y (meters)', 'Top-Down Ground View'),
-        'xz': ('X (meters)', 'Z (meters)', 'Side Ground View'),
-        'yz': ('Y (meters)', 'Z (meters)', 'Front Ground View')
-    }
-    
-    xlabel, ylabel, title_suffix = projection_labels.get(projection, ('X', 'Y', 'Ground View'))
-    
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel(ylabel)
-    ax.set_title(f'Erik\'s Yard Map - {title_suffix}')
-    ax.grid(True, alpha=0.3)
+            # Fallback to terrain-based coloring if no color data
+            print("No color data available, using terrain-style coloring")
+            if filtered_vertices.shape[1] > 2:
+                if projection == 'xy':
+                    height_data = filtered_vertices[:, 2]
+                    height_label = 'Ground Height (Z meters)'
+                elif projection == 'xz':
+                    height_data = filtered_vertices[:, 1] 
+                    height_label = 'Ground Depth (Y meters)'
+                elif projection == 'yz':
+                    height_data = filtered_vertices[:, 0]
+                    height_label = 'Ground Depth (X meters)'
+                
+                scatter = ax.scatter(x, y, c=height_data, cmap='terrain', s=point_size, alpha=0.8)
+                plt.colorbar(scatter, ax=ax, label=height_label)
+            else:
+                ax.scatter(x, y, s=point_size, alpha=0.8, color='brown')
+        
+        # Set equal aspect and labels for legacy matplotlib charts
+        ax.set_aspect('equal')
+        
+        # Labels based on projection
+        projection_labels = {
+            'xy': ('X (meters)', 'Y (meters)', 'Top-Down Ground View'),
+            'xz': ('X (meters)', 'Z (meters)', 'Side Ground View'),
+            'yz': ('Y (meters)', 'Z (meters)', 'Front Ground View')
+        }
+        
+        xlabel, ylabel, title_suffix = projection_labels.get(projection, ('X', 'Y', 'Ground View'))
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.set_title(f"Erik's Yard {title_suffix}")
+        ax.grid(True, alpha=0.3)
     
     # Print ground surface stats
     print(f"Ground surface bounds:")
@@ -278,13 +404,19 @@ def main():
     parser.add_argument('input', help='Input PLY mesh file path')
     parser.add_argument('--output', '-o', default='yard_map.png', help='Output image path')
     parser.add_argument('--grid-resolution', type=float, default=0.1, help='Grid resolution in meters (default: 0.1m)')
-    parser.add_argument('--height-window', type=float, help='Height window in meters - use simple average if all points within this range (default: use K-means)')
+    parser.add_argument('--height-window', type=float, default=0.5, help='Height window in meters - use simple average if all points within this range (default: 0.5m)')
     parser.add_argument('--search-distance', type=float, help='DEPRECATED: Not used with cube projection')
     parser.add_argument('--max-points', type=int, default=100000, 
                        help='Maximum points to process for performance (default: 100000)')
     parser.add_argument('--point-size', type=float, default=0.1, help='Point size for rendering (default: 0.1)')
     parser.add_argument('--projection', '-p', choices=['xy', 'xz', 'yz'], 
                        default='xy', help='Projection plane: xy=top-down, xz=side, yz=front (default: xy)')
+    parser.add_argument('--algorithm', choices=['kmeans', 'simple_average'], default='kmeans',
+                       help='Algorithm for processing points in each grid cell: kmeans=separate ground/foliage, simple_average=use all points (default: kmeans)')
+    parser.add_argument('--custom-bounds', type=float, nargs=4, metavar=('X_MIN', 'X_MAX', 'Y_MIN', 'Y_MAX'),
+                       help='Custom view bounds [x_min, x_max, y_min, y_max] for fixed scale and center')
+    parser.add_argument('--output-width', type=int, default=1280, help='Output image width in pixels (default: 1280)')
+    parser.add_argument('--output-height', type=int, default=720, help='Output image height in pixels (default: 720)')
     parser.add_argument('--dpi', type=int, default=150, help='Output image DPI (default: 150)')
     # Keep old parameters for backward compatibility (but ignore them)
     parser.add_argument('--depth-max', type=float, help='DEPRECATED: Ground-up projection used instead')
@@ -333,10 +465,15 @@ def main():
     print(f"  Point size: {args.point_size}")
     
     try:
-        fig, ax = create_yard_map(vertices, colors, None, None, args.point_size, 'true_color', args.projection, args.grid_resolution, args.height_window)
+        fig, ax = create_yard_map(vertices, colors, None, None, args.point_size, 'true_color', args.projection, args.grid_resolution, args.height_window, args.algorithm, args.custom_bounds, args.output_width, args.output_height)
         
         print(f"Saving to: {args.output}")
-        plt.savefig(args.output, dpi=args.dpi, bbox_inches='tight', facecolor='white')
+        if args.custom_bounds is not None:
+            # For custom bounds (raster images), save with exact dimensions
+            plt.savefig(args.output, dpi=100, bbox_inches=None, pad_inches=0, facecolor='white')
+        else:
+            # For legacy charts, use tight bounding box
+            plt.savefig(args.output, dpi=args.dpi, bbox_inches='tight', facecolor='white')
         plt.close()
         
         # Verify file was created and get size

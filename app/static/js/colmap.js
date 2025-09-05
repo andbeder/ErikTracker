@@ -75,7 +75,43 @@ class ColmapManager {
     /**
      * Update processing states based on current workflow
      */
-    updateProcessingStates() {
+    async updateProcessingStates() {
+        // First check if point cloud is already available
+        const hasPointCloud = await this.checkPointCloudAvailable();
+        
+        if (hasPointCloud) {
+            // Point cloud exists, mark everything as complete
+            this.processingState.frameExtraction = true;
+            this.processingState.featureExtraction = true;
+            this.processingState.sparseReconstruction = true;
+            this.processingState.denseReconstruction = true;
+            
+            // Update the enable point cloud button
+            const enablePointCloudBtn = document.getElementById('enablePointCloudBtn');
+            if (enablePointCloudBtn) {
+                enablePointCloudBtn.textContent = '✅ Point Cloud Available';
+                enablePointCloudBtn.disabled = true;
+            }
+            
+            // Hide the "Checking Reconstruction Status" message and show complete status
+            const statusChecking = document.getElementById('statusChecking');
+            const statusIncomplete = document.getElementById('statusIncomplete');
+            const statusComplete = document.getElementById('statusComplete');
+            
+            if (statusChecking) statusChecking.style.display = 'none';
+            if (statusIncomplete) statusIncomplete.style.display = 'none';
+            if (statusComplete) statusComplete.style.display = 'block';
+        } else {
+            // Point cloud not available, show incomplete status
+            const statusChecking = document.getElementById('statusChecking');
+            const statusIncomplete = document.getElementById('statusIncomplete');
+            const statusComplete = document.getElementById('statusComplete');
+            
+            if (statusChecking) statusChecking.style.display = 'none';
+            if (statusIncomplete) statusIncomplete.style.display = 'block';
+            if (statusComplete) statusComplete.style.display = 'none';
+        }
+        
         // Update workflow button states
         this.updateWorkflowButtons();
         
@@ -300,6 +336,126 @@ class ColmapManager {
         
         resultsContent.textContent = resultText;
         resultsDiv.style.display = 'block';
+        
+        // Add pose visualization section
+        this.addPoseVisualization(poseData);
+    }
+
+    /**
+     * Add pose visualization section to results
+     * @param {Object} poseData - Pose estimation data
+     */
+    async addPoseVisualization(poseData) {
+        try {
+            // Show the full-width validation section
+            const validationSection = document.getElementById('cameraValidationSection');
+            if (validationSection) {
+                validationSection.style.display = 'block';
+            }
+            
+            // Use the validation container instead of creating a new section
+            let vizContainer = document.getElementById('poseValidationContainer');
+            
+            if (!vizContainer) {
+                console.error('Validation container not found');
+                return;
+            }
+            
+            // Create visualization button and iframe container in the full-width container
+            vizContainer.innerHTML = `
+                <button id="showPoseVisualizationBtn" 
+                        style="background: #007bff; color: white; border: none; padding: 10px 20px; 
+                               border-radius: 5px; cursor: pointer; font-size: 14px; margin-bottom: 15px;">
+                    🎯 Show Pose Visualization
+                </button>
+                <div id="poseVisualizationFrame" style="display: none;">
+                    <div style="position: relative; width: 100%; height: 600px; border: 1px solid #ddd; border-radius: 5px;">
+                        <iframe id="poseVisualizationIframe" 
+                                style="width: 100%; height: 100%; border: none; border-radius: 5px;"
+                                title="Camera Pose Visualization">
+                        </iframe>
+                        <div style="position: absolute; top: 5px; right: 5px;">
+                            <button onclick="document.getElementById('poseVisualizationFrame').style.display='none'" 
+                                    style="background: rgba(255,255,255,0.8); border: 1px solid #ddd; 
+                                           padding: 5px 8px; border-radius: 3px; cursor: pointer; font-size: 12px;">
+                                ✕ Close
+                            </button>
+                        </div>
+                    </div>
+                    <p style="margin: 10px 0 0 0; color: #666; font-size: 12px; text-align: center;">
+                        <em>Blue wireframe shows camera view frustum. Red dot is camera position. Use mouse to orbit around the scene.</em>
+                    </p>
+                </div>
+            `;
+            
+            // Add event listener for visualization button
+            const showBtn = document.getElementById('showPoseVisualizationBtn');
+            if (showBtn) {
+                showBtn.onclick = async () => {
+                    await this.showPoseVisualization(poseData);
+                };
+            }
+            
+        } catch (error) {
+            console.error('Error adding pose visualization:', error);
+        }
+    }
+
+    /**
+     * Show camera pose visualization in iframe
+     * @param {Object} poseData - Pose estimation data
+     */
+    async showPoseVisualization(poseData) {
+        const showBtn = document.getElementById('showPoseVisualizationBtn');
+        const container = document.getElementById('poseVisualizationFrame');
+        const iframe = document.getElementById('poseVisualizationIframe');
+        
+        if (!showBtn || !container || !iframe) return;
+        
+        try {
+            // Update button state
+            showBtn.disabled = true;
+            showBtn.textContent = '⏳ Generating Visualization...';
+            
+            // Request pose visualization from backend
+            const response = await fetch('/api/colmap/render-camera-pose', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ camera_name: this.selectedCamera })
+            });
+            
+            const result = await response.json();
+            
+            if (result.status === 'success') {
+                // Load visualization via web server route instead of file:// URL
+                iframe.src = `/api/colmap/visualization/${this.selectedCamera}`;
+                
+                // Show container
+                container.style.display = 'block';
+                
+                // Update button
+                showBtn.textContent = '✅ Visualization Generated';
+                showBtn.style.background = '#28a745';
+                
+                // Scroll to visualization
+                container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                
+                Utils.showToast('🎯 Pose visualization generated successfully!', 'success');
+                
+            } else {
+                throw new Error(result.error || 'Failed to generate visualization');
+            }
+            
+        } catch (error) {
+            console.error('Error generating pose visualization:', error);
+            Utils.showToast(`❌ Visualization failed: ${error.message}`, 'error');
+            
+            // Reset button
+            showBtn.textContent = '🎯 Show Pose Visualization';
+            showBtn.style.background = '#007bff';
+        } finally {
+            showBtn.disabled = false;
+        }
     }
 
     /**
@@ -364,9 +520,26 @@ class ColmapManager {
                 <!-- Camera Info -->
                 <div style="margin-bottom: 15px;">
                     <h4 style="margin: 0 0 5px 0; color: #333;">${camera.icon} ${camera.display}</h4>
-                    <p style="margin: 0; color: #666; font-size: 14px;">
-                        ${pose ? `✅ Calibrated - ${new Date(pose.timestamp).toLocaleDateString()}` : '⚠️ Not calibrated'}
-                    </p>
+                    ${pose ? `
+                        <div style="margin: 8px 0; padding: 10px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 4px;">
+                            <div style="font-weight: 600; color: #155724; margin-bottom: 5px;">✅ Pose Calibrated</div>
+                            <div style="font-size: 12px; color: #155724;">
+                                <div><strong>Calibrated:</strong> ${new Date(pose.calibrated_at).toLocaleString()}</div>
+                                <div><strong>Confidence:</strong> ${(pose.confidence * 100).toFixed(1)}%</div>
+                                <div><strong>Features:</strong> ${pose.features_matched}/${pose.total_features}</div>
+                                <div><strong>Position:</strong> (${pose.translation.map(v => v.toFixed(2)).join(', ')})</div>
+                            </div>
+                            <button onclick="colmapManager.clearCameraPose('${camera.name}')" 
+                                    style="margin-top: 5px; padding: 2px 6px; font-size: 11px; background: #dc3545; color: white; border: none; border-radius: 3px; cursor: pointer;">
+                                🗑️ Clear Calibration
+                            </button>
+                        </div>
+                    ` : `
+                        <div style="margin: 8px 0; padding: 10px; background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 4px;">
+                            <div style="font-weight: 600; color: #856404;">⚠️ Not Calibrated</div>
+                            <div style="font-size: 12px; color: #856404;">Camera position not determined</div>
+                        </div>
+                    `}
                 </div>
                 
                 <!-- Action Buttons -->
@@ -399,12 +572,19 @@ class ColmapManager {
      */
     async checkPointCloudAvailable() {
         try {
+            console.log('Calling getMeshes API...');
             const result = await this.api.getMeshes();
-            if (result.success && result.mesh_files && result.mesh_files.length > 0) {
-                return result.mesh_files.some(file => 
-                    file.name.includes('colmap_reconstruction') || file.name.includes('fused.ply')
+            console.log('getMeshes result:', result);
+            
+            if (result.mesh_files && result.mesh_files.length > 0) {
+                console.log('Found mesh files:', result.mesh_files.map(f => f.name));
+                const hasYardFile = result.mesh_files.some(file => 
+                    file.name === 'yard_reconstruction.ply'
                 );
+                console.log('Has yard_reconstruction.ply:', hasYardFile);
+                return hasYardFile;
             }
+            console.log('No mesh files found');
             return false;
         } catch (error) {
             console.error('Error checking point cloud availability:', error);
@@ -443,6 +623,34 @@ class ColmapManager {
             }
         } catch (error) {
             Utils.showToast(`❌ Calibration error: ${error.message}`, 'error');
+        }
+    }
+
+    /**
+     * Clear camera pose calibration
+     * @param {string} cameraName - Camera name
+     */
+    async clearCameraPose(cameraName) {
+        if (!confirm(`This will clear the pose calibration for ${cameraName.replace('_', ' ')}. Continue?`)) {
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/colmap/clear-camera-pose/${cameraName}`, {
+                method: 'DELETE'
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                Utils.showToast(`✅ Pose calibration cleared for ${cameraName.replace('_', ' ')}`, 'success');
+                this.loadCameraPoseList(); // Refresh the list
+            } else {
+                Utils.showToast(`❌ Failed to clear calibration: ${result.message}`, 'error');
+            }
+        } catch (error) {
+            console.error('Error clearing camera pose:', error);
+            Utils.showToast(`❌ Error clearing calibration: ${error.message}`, 'error');
         }
     }
 
@@ -702,7 +910,7 @@ class ColmapManager {
 
                 // Update workflow buttons
                 this.updateWorkflowButtons();
-                this.updateProcessingStates();
+                await this.updateProcessingStates();
 
                 Utils.showToast(`✅ Successfully extracted ${data.frames_extracted} frames`, 'success');
             } else {
@@ -2258,13 +2466,63 @@ class ColmapManager {
                 }
             }
             
-            // Check for dense reconstruction
+            // First check if point cloud is already available (enabled)
+            console.log('Checking if point cloud is available...');
+            const hasPointCloud = await this.checkPointCloudAvailable();
+            console.log('Point cloud available:', hasPointCloud);
+            
+            if (hasPointCloud) {
+                console.log('Point cloud is available - dense reconstruction complete');
+                this.updateWorkflowStatus('dense_reconstruction', true);
+                
+                // Clear any existing dense reconstruction polling
+                if (this.denseProgressInterval) {
+                    console.log('Clearing dense reconstruction polling interval');
+                    clearInterval(this.denseProgressInterval);
+                    this.denseProgressInterval = null;
+                }
+                
+                // Enable point cloud button and show as ready
+                const enablePointCloudBtn = document.getElementById('enablePointCloudBtn');
+                if (enablePointCloudBtn) {
+                    enablePointCloudBtn.textContent = '✅ Point Cloud Available';
+                    enablePointCloudBtn.disabled = true;
+                }
+                
+                // Clear any "checking status" messages
+                const denseStatus = document.getElementById('denseStatus');
+                if (denseStatus) {
+                    denseStatus.textContent = '✅';
+                    denseStatus.className = 'processing-status completed';
+                    denseStatus.style.color = '#28a745';
+                }
+                
+                const progressContainer = document.getElementById('denseProgress');
+                if (progressContainer) {
+                    progressContainer.style.display = 'none';
+                }
+                
+                // Hide checking status and show complete status
+                const statusChecking = document.getElementById('statusChecking');
+                const statusIncomplete = document.getElementById('statusIncomplete');
+                const statusComplete = document.getElementById('statusComplete');
+                
+                if (statusChecking) statusChecking.style.display = 'none';
+                if (statusIncomplete) statusIncomplete.style.display = 'none';
+                if (statusComplete) statusComplete.style.display = 'block';
+                
+                return; // Skip dense reconstruction status check
+            }
+            
+            // Check for dense reconstruction directory only if point cloud not available
             const denseResponse = await fetch(`/api/colmap/check-file?project_dir=${encodeURIComponent(projectDir)}&file=dense`);
             if (denseResponse.ok) {
                 const denseResult = await denseResponse.json();
                 if (denseResult.exists) {
-                    console.log('Found dense reconstruction');
-                    this.updateWorkflowStatus('dense_reconstruction', true);
+                    console.log('Found dense reconstruction directory');
+                    // Only check status if we don't already have a point cloud
+                    // The point cloud check above would have returned if it existed
+                    this.checkDenseReconstructionStatus();
                 }
             }
             
@@ -2370,8 +2628,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         const projectDir = '/home/andrew/nvr/colmap_projects/current_reconstruction';
         await window.colmapManager.checkWorkflowStatus(projectDir);
         
-        // Check if dense reconstruction is currently running
-        await window.colmapManager.checkDenseReconstructionStatus();
+        // Only check dense reconstruction status if point cloud is not available
+        const hasPointCloud = await window.colmapManager.checkPointCloudAvailable();
+        if (!hasPointCloud) {
+            // Check if dense reconstruction is currently running
+            await window.colmapManager.checkDenseReconstructionStatus();
+        } else {
+            console.log('Point cloud already available, skipping dense reconstruction check');
+        }
     } else {
         console.log('ERROR: ColmapManager not initialized - missing dependencies');
         if (!window.api) console.log('Missing: window.api');

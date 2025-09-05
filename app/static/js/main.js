@@ -563,9 +563,9 @@ class MainApplication {
     /**
      * Check reconstruction status
      */
-    checkReconstructionStatus() {
+    async checkReconstructionStatus() {
         if (window.colmapManager) {
-            window.colmapManager.updateProcessingStates();
+            await window.colmapManager.updateProcessingStates();
         }
         
         if (window.yardMapManager) {
@@ -840,12 +840,45 @@ window.startPoseCalibration = function(cameraName) {
 // Yard map functions
 window.scanBoundaries = function() {
     console.log('Scanning mesh boundaries...');
-    // This will be implemented when yard map functionality is ready
+    console.log('YardMapManager available:', !!window.yardMapManager);
+    console.log('API available:', !!window.api);
+    
+    if (window.yardMapManager) {
+        window.yardMapManager.scanBoundaries();
+    } else if (window.api && typeof initializeYardMapManager === 'function') {
+        // Try to initialize YardMapManager
+        console.log('Attempting to initialize YardMapManager...');
+        if (initializeYardMapManager()) {
+            window.yardMapManager.scanBoundaries();
+        } else {
+            console.error('Failed to initialize YardMapManager');
+            Utils.showToast('❌ Failed to initialize yard map manager', 'error');
+        }
+    } else {
+        console.error('YardMapManager not initialized and cannot be initialized');
+        console.error('Missing dependencies - API:', !!window.api, 'initializeYardMapManager:', typeof initializeYardMapManager);
+        Utils.showToast('❌ Yard map manager not initialized', 'error');
+    }
 };
 
 window.generateYardMap = function() {
     console.log('Generating yard map...');
-    // This will be implemented when yard map functionality is ready
+    
+    if (window.yardMapManager) {
+        window.yardMapManager.generateYardMap();
+    } else if (window.api && typeof initializeYardMapManager === 'function') {
+        // Try to initialize YardMapManager
+        console.log('Attempting to initialize YardMapManager...');
+        if (initializeYardMapManager()) {
+            window.yardMapManager.generateYardMap();
+        } else {
+            console.error('Failed to initialize YardMapManager');
+            Utils.showToast('❌ Failed to initialize yard map manager', 'error');
+        }
+    } else {
+        console.error('YardMapManager not initialized');
+        Utils.showToast('❌ Yard map manager not initialized', 'error');
+    }
 };
 
 window.loadSavedMapThumbnail = function() {
@@ -1185,3 +1218,116 @@ async function refreshByoModelStatus() {
 document.addEventListener('DOMContentLoaded', function() {
     setTimeout(refreshByoModelStatus, 1000); // Wait for other initialization
 });
+
+// MQTT Settings Functions
+window.showMQTTSettings = function() {
+    const modal = document.getElementById('mqttSettingsModal');
+    if (modal) {
+        modal.style.display = 'flex';
+        // Initialize MQTT settings when modal opens
+        if (window.mqttSettings) {
+            window.mqttSettings.initialize();
+        }
+    }
+};
+
+window.closeMQTTSettings = function() {
+    const modal = document.getElementById('mqttSettingsModal');
+    if (modal) {
+        modal.style.display = 'none';
+        // Stop status monitoring when modal closes
+        if (window.mqttSettings) {
+            window.mqttSettings.stopStatusMonitoring();
+        }
+    }
+};
+
+// Update MQTT quick status in Settings tab
+window.updateMQTTQuickStatus = async function() {
+    try {
+        const response = await fetch('/api/mqtt/status');
+        const data = await response.json();
+        
+        if (data.success) {
+            const statusEl = document.getElementById('mqtt-quick-status');
+            const brokerEl = document.getElementById('mqtt-quick-broker');
+            
+            if (statusEl) {
+                statusEl.textContent = data.status.connected ? '🟢 Connected' : '🔴 Disconnected';
+            }
+            if (brokerEl) {
+                brokerEl.textContent = data.status.broker || 'Not configured';
+            }
+        }
+    } catch (error) {
+        console.error('Failed to update MQTT status:', error);
+    }
+};
+
+// Update MQTT status when Settings tab is shown
+document.addEventListener('DOMContentLoaded', function() {
+    // Initial status check
+    updateMQTTQuickStatus();
+    
+    // Update status every 10 seconds when on Settings tab
+    setInterval(function() {
+        const settingsTab = document.querySelector('.tab-content[data-tab="settings"]');
+        if (settingsTab && settingsTab.style.display !== 'none') {
+            updateMQTTQuickStatus();
+        }
+    }, 10000);
+    
+    // Check for point cloud availability and enable camera pose section
+    checkCameraPoseAvailability();
+});
+
+// Check if camera pose recognition should be enabled
+async function checkCameraPoseAvailability() {
+    try {
+        // Check for BYO model point cloud or pipeline point cloud
+        const meshResponse = await fetch('/api/yard-map/mesh-files');
+        const meshData = await meshResponse.json();
+        
+        let hasPointCloud = false;
+        
+        if (meshData.mesh_files && meshData.mesh_files.length > 0) {
+            // Check for pipeline reconstruction point cloud
+            hasPointCloud = meshData.mesh_files.some(file => 
+                file.name === 'yard_reconstruction.ply'
+            );
+            
+            // If no pipeline point cloud, check for BYO model files
+            if (!hasPointCloud) {
+                const byoResponse = await fetch('/api/colmap/list-byo-model');
+                const byoData = await byoResponse.json();
+                
+                if (byoData.success && byoData.files) {
+                    const requiredFiles = ['cameras.bin', 'images.bin', 'points3D.bin', 'fusion.ply'];
+                    const uploadedFiles = Object.keys(byoData.files);
+                    hasPointCloud = requiredFiles.every(file => uploadedFiles.includes(file));
+                }
+            }
+        }
+        
+        // Show/hide camera pose section based on availability
+        const disabledSection = document.getElementById('poseRecognitionDisabled');
+        const enabledSection = document.getElementById('poseRecognitionEnabled');
+        
+        if (hasPointCloud) {
+            if (disabledSection) disabledSection.style.display = 'none';
+            if (enabledSection) {
+                enabledSection.style.display = 'block';
+                // Load camera poses if colmapManager is available
+                if (window.colmapManager) {
+                    window.colmapManager.loadCameraPoseList();
+                }
+            }
+        } else {
+            if (disabledSection) disabledSection.style.display = 'block';
+            if (enabledSection) enabledSection.style.display = 'none';
+        }
+        
+    } catch (error) {
+        console.error('Error checking camera pose availability:', error);
+    }
+}

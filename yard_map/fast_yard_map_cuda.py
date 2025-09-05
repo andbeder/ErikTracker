@@ -348,10 +348,196 @@ def cuda_process_pixels_with_grid(vertices_2d, vertices_z, colors,
         output_image[row, col, 2] = 50
 
 
+@cuda.jit
+def cuda_simple_average_pixels(vertices_2d, vertices_z, colors, 
+                               grid_cells, grid_count,
+                               x_min, y_min, y_max, pixel_size, cell_size,
+                               output_image, coloring_mode, 
+                               z_min, z_max, raster_width, raster_height,
+                               grid_width):
+    """
+    CUDA kernel for true simple averaging - averages ALL points in each pixel.
+    No percentile filtering, no height thresholds - just average everything.
+    """
+    # Get pixel coordinates
+    pixel_id = cuda.grid(1)
+    if pixel_id >= raster_width * raster_height:
+        return
+    
+    col = pixel_id % raster_width
+    row = pixel_id // raster_width
+    
+    # Calculate pixel boundaries in world coordinates
+    pixel_x_min = x_min + col * pixel_size
+    pixel_x_max = x_min + (col + 1) * pixel_size
+    pixel_y_min = y_max - (row + 1) * pixel_size  # Image Y is flipped
+    pixel_y_max = y_max - row * pixel_size
+    
+    # Find which grid cells overlap with this pixel
+    cell_x_min = int((pixel_x_min - x_min) / cell_size)
+    cell_x_max = int((pixel_x_max - x_min) / cell_size) 
+    cell_y_min = int((pixel_y_min - y_min) / cell_size)
+    cell_y_max = int((pixel_y_max - y_min) / cell_size)
+    
+    # Clamp to grid bounds
+    if cell_x_min < 0: cell_x_min = 0
+    if cell_x_max >= grid_width: cell_x_max = grid_width - 1
+    if cell_y_min < 0: cell_y_min = 0
+    if cell_y_max >= grid_width: cell_y_max = grid_width - 1
+    
+    # Arrays to store points in this pixel
+    pixel_points = cuda.local.array(500, types.int32)  # Max 500 points per pixel
+    pixel_count = 0
+    
+    # Check all overlapping grid cells
+    for cell_y in range(cell_y_min, cell_y_max + 1):
+        for cell_x in range(cell_x_min, cell_x_max + 1):
+            cell_idx = cell_y * grid_width + cell_x
+            cell_point_count = grid_count[cell_idx]
+            
+            # Check all points in this cell
+            for i in range(min(cell_point_count, 100)):  # Max 100 points per cell
+                point_idx = grid_cells[cell_idx, i]
+                
+                # Check if point is actually within pixel bounds
+                if (vertices_2d[point_idx, 0] >= pixel_x_min and 
+                    vertices_2d[point_idx, 0] <= pixel_x_max and
+                    vertices_2d[point_idx, 1] >= pixel_y_min and 
+                    vertices_2d[point_idx, 1] <= pixel_y_max):
+                    
+                    if pixel_count < 500:  # Avoid overflow
+                        pixel_points[pixel_count] = point_idx
+                        pixel_count += 1
+    
+    # If no points found, expand search area progressively
+    expansion = 1
+    while pixel_count == 0 and expansion <= 5:  # Max 5-pixel expansion
+        # Expand pixel bounds by 'expansion' pixels on all sides
+        expanded_pixel_size = pixel_size * expansion
+        expanded_x_min = pixel_x_min - (expanded_pixel_size * (expansion - 1))
+        expanded_x_max = pixel_x_max + (expanded_pixel_size * (expansion - 1))
+        expanded_y_min = pixel_y_min - (expanded_pixel_size * (expansion - 1))
+        expanded_y_max = pixel_y_max + (expanded_pixel_size * (expansion - 1))
+        
+        # Recalculate grid cells for expanded area
+        exp_cell_x_min = int((expanded_x_min - x_min) / cell_size)
+        exp_cell_x_max = int((expanded_x_max - x_min) / cell_size)
+        exp_cell_y_min = int((expanded_y_min - y_min) / cell_size)
+        exp_cell_y_max = int((expanded_y_max - y_min) / cell_size)
+        
+        # Clamp to grid bounds
+        if exp_cell_x_min < 0: exp_cell_x_min = 0
+        if exp_cell_x_max >= grid_width: exp_cell_x_max = grid_width - 1
+        if exp_cell_y_min < 0: exp_cell_y_min = 0
+        if exp_cell_y_max >= grid_width: exp_cell_y_max = grid_width - 1
+        
+        # Search in expanded area
+        for cell_y in range(exp_cell_y_min, exp_cell_y_max + 1):
+            for cell_x in range(exp_cell_x_min, exp_cell_x_max + 1):
+                cell_idx = cell_y * grid_width + cell_x
+                cell_point_count = grid_count[cell_idx]
+                
+                for i in range(min(cell_point_count, 100)):
+                    point_idx = grid_cells[cell_idx, i]
+                    
+                    # Check if point is within expanded bounds
+                    if (vertices_2d[point_idx, 0] >= expanded_x_min and 
+                        vertices_2d[point_idx, 0] <= expanded_x_max and
+                        vertices_2d[point_idx, 1] >= expanded_y_min and 
+                        vertices_2d[point_idx, 1] <= expanded_y_max):
+                        
+                        if pixel_count < 500:
+                            pixel_points[pixel_count] = point_idx
+                            pixel_count += 1
+        
+        expansion += 1
+    
+    # Process pixel with simple averaging of ALL points (no filtering)
+    if pixel_count > 0:
+        # Simple average of ALL points - no percentile filtering
+        color_r = 0.0
+        color_g = 0.0
+        color_b = 0.0
+        height_sum = 0.0
+        
+        for j in range(pixel_count):
+            point_idx = pixel_points[j]
+            
+            if coloring_mode == 0:  # true_color
+                color_r += colors[point_idx, 0]
+                color_g += colors[point_idx, 1] 
+                color_b += colors[point_idx, 2]
+            
+            height_sum += vertices_z[point_idx]
+        
+        # Set pixel color based on coloring mode
+        if coloring_mode == 0:  # true_color
+            # Simple average of ALL colors
+            avg_r = color_r / pixel_count
+            avg_g = color_g / pixel_count  
+            avg_b = color_b / pixel_count
+            
+            # Ensure 0-255 range
+            if avg_r <= 1.0:
+                avg_r *= 255
+            if avg_g <= 1.0:
+                avg_g *= 255
+            if avg_b <= 1.0:
+                avg_b *= 255
+            
+            output_image[row, col, 0] = int(avg_r)
+            output_image[row, col, 1] = int(avg_g)
+            output_image[row, col, 2] = int(avg_b)
+            
+        elif coloring_mode == 1:  # height gradient
+            # Average height for gradient coloring
+            avg_height = height_sum / pixel_count
+            height_range = z_max - z_min
+            if height_range > 0:
+                normalized_height = (avg_height - z_min) / height_range
+            else:
+                normalized_height = 0.0
+                
+            # Simple terrain gradient: blue (low) -> green (mid) -> brown (high)
+            if normalized_height <= 0.33:
+                # Blue to green
+                t = normalized_height * 3
+                output_image[row, col, 0] = int((1-t) * 100 + t * 34)
+                output_image[row, col, 1] = int((1-t) * 150 + t * 139) 
+                output_image[row, col, 2] = int((1-t) * 255 + t * 34)
+            elif normalized_height <= 0.67:
+                # Green to brown
+                t = (normalized_height - 0.33) * 3
+                output_image[row, col, 0] = int((1-t) * 34 + t * 139)
+                output_image[row, col, 1] = int((1-t) * 139 + t * 90)
+                output_image[row, col, 2] = int((1-t) * 34 + t * 45)
+            else:
+                # Brown to white
+                t = (normalized_height - 0.67) * 3
+                output_image[row, col, 0] = int((1-t) * 139 + t * 255)
+                output_image[row, col, 1] = int((1-t) * 90 + t * 255)
+                output_image[row, col, 2] = int((1-t) * 45 + t * 255)
+                
+        else:  # coloring_mode == 2: simple average visualization
+            # Show uniform green for simple average (no filtering applied)
+            output_image[row, col, 0] = 34   # Forest green
+            output_image[row, col, 1] = 139
+            output_image[row, col, 2] = 34
+    else:
+        # No points found - gray
+        output_image[row, col, 0] = 128
+        output_image[row, col, 1] = 128
+        output_image[row, col, 2] = 128
+
+
 def create_cuda_raster_map(vertices, colors=None, projection='xy', grid_resolution=0.1, 
                           height_window=0.5, custom_bounds=None, coloring='true_color', 
-                          output_width=1280, output_height=720, rotation=0):
-    """Create ultra-fast CUDA-accelerated yard map with dynamic resolution."""
+                          output_width=1280, output_height=720, rotation=0, algorithm='bottom_percentile'):
+    """Create ultra-fast CUDA-accelerated yard map with dynamic resolution.
+    
+    Args:
+        algorithm: 'bottom_percentile' (default) or 'simple_average'
+    """
     
     if not CUDA_AVAILABLE:
         raise RuntimeError("CUDA not available - cannot use GPU acceleration")
@@ -511,15 +697,27 @@ def create_cuda_raster_map(vertices, colors=None, projection='xy', grid_resoluti
     blocks_per_grid = (total_pixels + threads_per_block - 1) // threads_per_block
     
     print(f"CUDA config: {blocks_per_grid} blocks x {threads_per_block} threads = {blocks_per_grid * threads_per_block} total threads")
+    print(f"Using algorithm: {algorithm}")
     
-    # Launch optimized CUDA kernel with spatial grid
-    cuda_process_pixels_with_grid[blocks_per_grid, threads_per_block](
-        gpu_vertices_2d, gpu_vertices_z, gpu_colors,
-        gpu_grid_cells, gpu_grid_count,
-        x_min_adjusted, y_min_adjusted, y_max_adjusted, pixel_size, cell_size,
-        height_window, gpu_output, coloring_mode, z_min, z_max,
-        RASTER_WIDTH, RASTER_HEIGHT, grid_width
-    )
+    # Choose CUDA kernel based on algorithm
+    if algorithm == 'simple_average':
+        print("Launching simple average CUDA kernel...")
+        cuda_simple_average_pixels[blocks_per_grid, threads_per_block](
+            gpu_vertices_2d, gpu_vertices_z, gpu_colors,
+            gpu_grid_cells, gpu_grid_count,
+            x_min_adjusted, y_min_adjusted, y_max_adjusted, pixel_size, cell_size,
+            gpu_output, coloring_mode, z_min, z_max,
+            RASTER_WIDTH, RASTER_HEIGHT, grid_width
+        )
+    else:  # bottom_percentile (default)
+        print("Launching bottom percentile CUDA kernel...")
+        cuda_process_pixels_with_grid[blocks_per_grid, threads_per_block](
+            gpu_vertices_2d, gpu_vertices_z, gpu_colors,
+            gpu_grid_cells, gpu_grid_count,
+            x_min_adjusted, y_min_adjusted, y_max_adjusted, pixel_size, cell_size,
+            height_window, gpu_output, coloring_mode, z_min, z_max,
+            RASTER_WIDTH, RASTER_HEIGHT, grid_width
+        )
     
     # Wait for GPU computation to complete
     cp.cuda.Stream.null.synchronize()
@@ -541,7 +739,7 @@ def create_cuda_raster_map(vertices, colors=None, projection='xy', grid_resoluti
 
 def create_yard_map(vertices, colors=None, projection='xy', grid_resolution=0.1, 
                    height_window=0.5, custom_bounds=None, coloring='true_color',
-                   output_width=1280, output_height=720, rotation=0):
+                   output_width=1280, output_height=720, rotation=0, algorithm='bottom_percentile'):
     """Create rasterized yard map using CUDA acceleration with dynamic resolution."""
     print(f"Creating CUDA-accelerated yard map:")
     print(f"  Output: {output_width}x{output_height} raster image")
@@ -558,7 +756,7 @@ def create_yard_map(vertices, colors=None, projection='xy', grid_resolution=0.1,
     # Create CUDA-accelerated rasterized image
     raster_image = create_cuda_raster_map(
         vertices, colors, projection, grid_resolution, height_window, custom_bounds, coloring,
-        output_width, output_height, rotation
+        output_width, output_height, rotation, algorithm
     )
     
     # Convert numpy array to PIL Image
@@ -582,6 +780,10 @@ def main():
     parser.add_argument('--coloring', choices=['true_color', 'height', 'path'], default='true_color', 
                        help='Coloring mode: true_color=mesh colors, height=elevation gradient, path=algorithm visualization')
     parser.add_argument('--bounds', type=str, help='Custom bounds as x_min,x_max,y_min,y_max for focused rendering')
+    parser.add_argument('--x-min', type=float, help='Minimum X coordinate')
+    parser.add_argument('--x-max', type=float, help='Maximum X coordinate') 
+    parser.add_argument('--y-min', type=float, help='Minimum Y coordinate')
+    parser.add_argument('--y-max', type=float, help='Maximum Y coordinate')
     parser.add_argument('--max-points', type=int, default=20000000, 
                        help='Maximum points to process for performance (default: 20000000)')
     parser.add_argument('--output-width', type=int, default=1280, 
@@ -592,6 +794,8 @@ def main():
                        default='xy', help='Projection plane: xy=top-down, xz=side, yz=front (default: xy)')
     parser.add_argument('--rotation', type=float, default=0, 
                        help='Rotation angle in degrees (default: 0)')
+    parser.add_argument('--algorithm', choices=['bottom_percentile', 'simple_average'], default='bottom_percentile',
+                       help='Algorithm: bottom_percentile=lowest 40%% points, simple_average=all points (default: bottom_percentile)')
     
     args = parser.parse_args()
     
@@ -619,7 +823,12 @@ def main():
     try:
         # Parse custom bounds if provided
         custom_bounds = None
-        if args.bounds:
+        if args.x_min is not None and args.x_max is not None and args.y_min is not None and args.y_max is not None:
+            # Use separate parameters
+            custom_bounds = [args.x_min, args.x_max, args.y_min, args.y_max]
+            print(f"Using custom bounds: X=[{custom_bounds[0]:.2f}, {custom_bounds[1]:.2f}], Y=[{custom_bounds[2]:.2f}, {custom_bounds[3]:.2f}]")
+        elif args.bounds:
+            # Fall back to comma-separated string
             try:
                 bounds_values = [float(x.strip()) for x in args.bounds.split(',')]
                 if len(bounds_values) == 4:
@@ -632,7 +841,7 @@ def main():
         
         img = create_yard_map(
             vertices, colors, args.projection, args.grid_resolution, args.height_window, custom_bounds, args.coloring,
-            args.output_width, args.output_height, args.rotation
+            args.output_width, args.output_height, args.rotation, args.algorithm
         )
         
         print(f"Saving {args.output_width}x{args.output_height} CUDA raster to: {args.output}")

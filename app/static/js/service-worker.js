@@ -26,6 +26,7 @@ const STATIC_ASSETS = [
     '/static/js/performance-optimizer.js',
     '/static/js/image-manager.js',
     '/static/js/colmap.js',
+    '/static/js/camera-overlay.js',
     '/static/js/yard-map.js'
 ];
 

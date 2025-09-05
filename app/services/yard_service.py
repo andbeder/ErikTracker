@@ -30,14 +30,16 @@ class YardMappingService:
         
         # Yard map generation scripts
         self.script_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        self.fast_yard_map_script = os.path.join(self.script_dir, 'fast_yard_map.py')
-        self.raster_yard_map_script = os.path.join(self.script_dir, 'fast_yard_map_raster.py')
+        self.yard_map_dir = os.path.join(self.script_dir, 'yard_map')
+        self.fast_yard_map_script = os.path.join(self.yard_map_dir, 'fast_yard_map.py')
+        self.raster_yard_map_script = os.path.join(self.yard_map_dir, 'fast_yard_map_raster.py')
         
-        # Python executable (works with venv)
-        self.python_executable = sys.executable
+        # Python executable (use dev-venv for packages)
+        venv_python = os.path.join(self.script_dir, 'dev-venv', 'bin', 'python3')
+        self.python_executable = venv_python if os.path.exists(venv_python) else sys.executable
     
     def generate_yard_map(self, mesh_path, grid_resolution=0.1, max_points=50000, 
-                         point_size=0.1, projection='xy'):
+                         point_size=0.1, projection='xy', algorithm='kmeans', custom_bounds=None, height_window=0.5, rotation=0):
         """Generate yard map from mesh file
         
         Args:
@@ -46,25 +48,64 @@ class YardMappingService:
             max_points: Maximum number of points to process
             point_size: Size of points in the visualization
             projection: Projection plane ('xy', 'xz', 'yz')
+            algorithm: Algorithm for processing points ('kmeans', 'simple_average')
+            custom_bounds: [x_min, x_max, y_min, y_max] for fixed view area and scale
+            height_window: Height window for K-means optimization (default: 0.5m)
+            rotation: Rotation angle in degrees (default: 0)
             
         Returns:
             Tuple of (image_data, output_log) or (None, error_message) if failed
         """
         try:
-            cmd = [
-                self.python_executable, self.fast_yard_map_script, mesh_path,
-                '--max-points', str(max_points),
-                '--point-size', str(point_size),
-                '--grid-resolution', str(grid_resolution),
-                '--projection', projection
-            ]
+            logger.info(f"Generating yard map with algorithm: {algorithm}, custom_bounds: {custom_bounds}")
+            
+            # Use CUDA script for bottom_percentile and simple_average, regular script for kmeans
+            if algorithm in ['simple_average', 'bottom_percentile']:
+                script_to_use = os.path.join(self.yard_map_dir, 'fast_yard_map_cuda.py')
+                # Use much higher point limit for CUDA algorithms since they can handle it efficiently
+                cuda_max_points = 20000000  # Use full dataset for CUDA algorithms
+                cmd = [
+                    self.python_executable, script_to_use, mesh_path,
+                    '--max-points', str(cuda_max_points),
+                    '--grid-resolution', str(grid_resolution),
+                    '--projection', projection,
+                    '--algorithm', algorithm,
+                    '--rotation', str(rotation)
+                ]
+                logger.info(f"Using CUDA algorithm with {cuda_max_points:,} max points")
+                
+                # CUDA script uses separate parameters for bounds
+                if custom_bounds is not None and len(custom_bounds) == 4 and all(isinstance(x, (int, float)) and x is not None for x in custom_bounds):
+                    cmd.extend(['--x-min', str(custom_bounds[0])])
+                    cmd.extend(['--x-max', str(custom_bounds[1])])
+                    cmd.extend(['--y-min', str(custom_bounds[2])])
+                    cmd.extend(['--y-max', str(custom_bounds[3])])
+                    logger.info(f"Added bounds parameters: x=[{custom_bounds[0]}, {custom_bounds[1]}], y=[{custom_bounds[2]}, {custom_bounds[3]}]")
+                elif custom_bounds is not None:
+                    logger.warning(f"Invalid custom_bounds ignored: {custom_bounds} (type: {type(custom_bounds)}, len: {len(custom_bounds) if hasattr(custom_bounds, '__len__') else 'N/A'})")
+                    
+            else:  # kmeans - use regular script
+                cmd = [
+                    self.python_executable, self.fast_yard_map_script, mesh_path,
+                    '--max-points', str(max_points),
+                    '--point-size', str(point_size),
+                    '--grid-resolution', str(grid_resolution),
+                    '--projection', projection,
+                    '--algorithm', algorithm,
+                    '--height-window', str(height_window)
+                ]
+                
+                # Add custom bounds if provided
+                if custom_bounds is not None:
+                    cmd.extend(['--custom-bounds'] + [str(bound) for bound in custom_bounds])
                 
             # Create temporary output file
             with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
                 cmd.extend(['--output', tmp_file.name])
                 
-                logger.info(f"Running yard map generation: {' '.join(cmd)}")
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                logger.info(f"Running yard map generation command: {cmd}")
+                logger.info(f"Command as string: {' '.join(cmd)}")
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
                 
                 if result.returncode == 0:
                     # Read the generated image
@@ -81,7 +122,7 @@ class YardMappingService:
                     
         except subprocess.TimeoutExpired:
             logger.error("Yard map generation timed out")
-            return None, "Generation timed out after 2 minutes"
+            return None, "Generation timed out after 10 minutes"
         except Exception as e:
             logger.error(f"Error generating yard map: {e}")
             return None, str(e)
@@ -117,29 +158,17 @@ class YardMappingService:
                 self.python_executable, self.raster_yard_map_script, mesh_path,
                 '--max-points', str(max_points),
                 '--grid-resolution', str(grid_resolution),
-                '--projection', projection,
-                '--height-window', str(height_window),
-                '--coloring', coloring,
-                '--output-width', str(output_width),
-                '--output-height', str(output_height),
-                '--rotation', str(rotation)
+                '--projection', projection
             ]
             
-            # Add custom bounds if provided
-            if custom_bounds:
-                cmd.extend([
-                    '--xmin', str(custom_bounds['xmin']),
-                    '--xmax', str(custom_bounds['xmax']),
-                    '--ymin', str(custom_bounds['ymin']),
-                    '--ymax', str(custom_bounds['ymax'])
-                ])
+            # Note: custom bounds not supported by raster script
                 
             # Create temporary output file
             with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
                 cmd.extend(['--output', tmp_file.name])
                 
                 logger.info(f"Running raster yard map generation")
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
                 
                 if result.returncode == 0:
                     # Read the generated image
@@ -156,7 +185,7 @@ class YardMappingService:
                     
         except subprocess.TimeoutExpired:
             logger.error("Raster yard map generation timed out")
-            return None, "Generation timed out after 3 minutes"
+            return None, "Generation timed out after 10 minutes"
         except Exception as e:
             logger.error(f"Error generating raster yard map: {e}")
             return None, str(e)
@@ -166,36 +195,72 @@ class YardMappingService:
         
         Args:
             mesh_path: Path to the mesh file
-            grid_resolution: Grid resolution for sampling
-            projection: Projection plane
+            grid_resolution: Grid resolution for sampling (not used in direct calculation)
+            projection: Projection plane ('xy', 'xz', 'yz')
             
         Returns:
             Bounds dictionary or None if failed
         """
         try:
-            cmd = [
-                self.python_executable, self.fast_yard_map_script, mesh_path,
-                '--scan-bounds-only',
-                '--grid-resolution', str(grid_resolution),
-                '--projection', projection
-            ]
+            import trimesh
+            import numpy as np
             
-            logger.info(f"Scanning bounds for: {mesh_path}")
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            logger.info(f"Scanning bounds for: {mesh_path} with projection: {projection}")
             
-            if result.returncode == 0:
-                # Parse bounds from output
-                for line in result.stdout.split('\n'):
-                    if line.startswith('BOUNDS_JSON:'):
-                        bounds_str = line.replace('BOUNDS_JSON:', '').strip()
-                        return json.loads(bounds_str)
-                        
-                logger.error("Bounds not found in output")
-                return None
+            # Load mesh and get vertices
+            mesh = trimesh.load(mesh_path)
+            vertices = mesh.vertices
+            
+            # Calculate 2-98 percentile bounds for all axes
+            x_bounds = np.percentile(vertices[:, 0], [2, 98])
+            y_bounds = np.percentile(vertices[:, 1], [2, 98])
+            z_bounds = np.percentile(vertices[:, 2], [2, 98])
+            
+            # Select bounds based on projection
+            if projection == 'xy':
+                axis1_bounds = x_bounds
+                axis2_bounds = y_bounds
+                axis1_label = 'X'
+                axis2_label = 'Y'
+            elif projection == 'xz':
+                axis1_bounds = x_bounds
+                axis2_bounds = z_bounds
+                axis1_label = 'X'
+                axis2_label = 'Z'
+            elif projection == 'yz':
+                axis1_bounds = y_bounds
+                axis2_bounds = z_bounds
+                axis1_label = 'Y'
+                axis2_label = 'Z'
             else:
-                logger.error(f"Bounds scanning failed: {result.stderr}")
+                logger.error(f"Invalid projection: {projection}")
                 return None
+            
+            logger.info(f"Scanned bounds: {axis1_label}=[{axis1_bounds[0]:.2f}, {axis1_bounds[1]:.2f}], {axis2_label}=[{axis2_bounds[0]:.2f}, {axis2_bounds[1]:.2f}]")
+            
+            # Return the bounds with axis labels
+            bounds = {
+                'axis1_min': float(axis1_bounds[0]),
+                'axis1_max': float(axis1_bounds[1]),
+                'axis2_min': float(axis2_bounds[0]),
+                'axis2_max': float(axis2_bounds[1]),
+                'axis1_label': axis1_label,
+                'axis2_label': axis2_label,
+                # Keep legacy fields for compatibility
+                'x_min': float(axis1_bounds[0]),
+                'x_max': float(axis1_bounds[1]),
+                'y_min': float(axis2_bounds[0]),
+                'y_max': float(axis2_bounds[1]),
+                'z_min': float(z_bounds[0]),
+                'z_max': float(z_bounds[1]),
+                'total_points': len(vertices)
+            }
+            
+            return bounds
                 
+        except ImportError as e:
+            logger.error(f"Missing required library: {e}")
+            return None
         except Exception as e:
             logger.error(f"Error scanning bounds: {e}")
             return None
@@ -242,11 +307,40 @@ class YardMappingService:
             
             # Save metadata if provided
             if metadata:
-                metadata['saved_at'] = datetime.now().isoformat()
-                metadata['image_path'] = self.active_yard_map_path
+                # Enhanced metadata for Erik positioning
+                enhanced_metadata = {
+                    'saved_at': datetime.now().isoformat(),
+                    'image_path': self.active_yard_map_path,
+                    'source': metadata.get('source', 'generated'),
+                    'parameters': metadata.get('parameters', {}),
+                    
+                    # Map positioning data for Erik
+                    'map_bounds': {
+                        'x_min': metadata.get('map_bounds', {}).get('x_min'),
+                        'x_max': metadata.get('map_bounds', {}).get('x_max'),
+                        'y_min': metadata.get('map_bounds', {}).get('y_min'),
+                        'y_max': metadata.get('map_bounds', {}).get('y_max'),
+                        'center_x': metadata.get('map_bounds', {}).get('center_x'),
+                        'center_y': metadata.get('map_bounds', {}).get('center_y'),
+                        'scale_meters_per_pixel': metadata.get('map_bounds', {}).get('scale_meters_per_pixel'),
+                        'rotation_degrees': metadata.get('map_bounds', {}).get('rotation_degrees', 0),
+                        'projection': metadata.get('map_bounds', {}).get('projection', 'xy')
+                    },
+                    
+                    # Image dimensions
+                    'image_width': metadata.get('image_width'),
+                    'image_height': metadata.get('image_height'),
+                    
+                    # Generation metadata
+                    'algorithm': metadata.get('parameters', {}).get('algorithm'),
+                    'grid_resolution': metadata.get('parameters', {}).get('grid_resolution'),
+                    'mesh_file': metadata.get('parameters', {}).get('mesh_file')
+                }
                 
                 with open(self.active_yard_map_json, 'w') as f:
-                    json.dump(metadata, f, indent=2)
+                    json.dump(enhanced_metadata, f, indent=2)
+                    
+                logger.info(f"Saved active yard map with enhanced metadata: bounds={enhanced_metadata['map_bounds']}")
             
             logger.info(f"Saved active yard map to {self.active_yard_map_path}")
             return True

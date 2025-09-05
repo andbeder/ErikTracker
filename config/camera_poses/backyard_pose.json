@@ -1,0 +1,46 @@
+{
+  "camera_name": "backyard",
+  "transformation_matrix": [
+    [
+      0.866025,
+      -0.5,
+      0.0,
+      2.009909097180598
+    ],
+    [
+      0.5,
+      0.866025,
+      0.0,
+      -5.832315277236264
+    ],
+    [
+      0.0,
+      0.0,
+      1.0,
+      2.810306957580641
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "translation": [
+    2.009909097180598,
+    -5.832315277236264,
+    2.810306957580641
+  ],
+  "rotation": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+  ],
+  "confidence": 0.94,
+  "features_matched": 260,
+  "total_features": 1106,
+  "calibrated_at": "2025-09-05T11:54:34.602050",
+  "calibration_status": "calibrated",
+  "byo_model_used": true
+}

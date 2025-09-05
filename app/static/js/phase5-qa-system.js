@@ -102,7 +102,7 @@ class QualityAssuranceSystem {
             // Check JavaScript modules exist and load properly
             const jsModules = [
                 'utils.js', 'api.js', 'config.js', 'main.js',
-                'image-manager.js', 'colmap.js', 'yard-map.js'
+                'image-manager.js', 'colmap.js', 'camera-overlay.js', 'yard-map.js'
             ];
 
             for (const file of jsModules) {

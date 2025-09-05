@@ -344,7 +344,10 @@ class PerformanceOptimizer {
             // Add timeout to request (skip timeout for COLMAP operations)
             const controller = new AbortController();
             const isColmapRequest = url.includes('/api/colmap/');
-            const timeoutDuration = isColmapRequest ? 30 * 60 * 1000 : this.thresholds.fetchTimeout; // 30 min for COLMAP, 10s for others
+            const isYardMapRequest = url.includes('/api/yard-map/');
+            const timeoutDuration = isColmapRequest ? 30 * 60 * 1000 : 
+                                  isYardMapRequest ? 10 * 60 * 1000 : 
+                                  this.thresholds.fetchTimeout; // 30 min for COLMAP, 10 min for yard-map, 10s for others
             const timeoutId = setTimeout(() => controller.abort(), timeoutDuration);
 
             try {

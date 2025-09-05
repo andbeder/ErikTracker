@@ -65,6 +65,7 @@ def register_blueprints(app):
     from app.api.cameras import bp as cameras_bp
     from app.api.erik import bp as erik_bp
     from app.api.config import bp as config_bp
+    from app.api.mqtt_settings import bp as mqtt_bp
     
     app.register_blueprint(images_bp)
     app.register_blueprint(colmap_bp)
@@ -73,3 +74,4 @@ def register_blueprints(app):
     app.register_blueprint(cameras_bp)
     app.register_blueprint(erik_bp)
     app.register_blueprint(config_bp)
+    app.register_blueprint(mqtt_bp, url_prefix='/api/mqtt')
