@@ -768,3 +768,135 @@ def get_camera_rtsp_info(camera_name):
     except Exception as e:
         logger.error(f"Error getting RTSP info for {camera_name}: {e}")
         return jsonify({'error': f'RTSP info error: {str(e)}'}), 500
+
+@bp.route('/<camera_name>/direct-rtsp-hls', methods=['GET'])
+def get_direct_rtsp_hls(camera_name):
+    """Convert direct RTSP feed to HLS using forwarded ports"""
+    try:
+        import subprocess
+        import threading
+        import time
+        import tempfile
+        
+        # Map camera names to forwarded RTSP ports
+        rtsp_port_map = {
+            'front_door': 5101,
+            'backyard': 5102,
+            'side_yard': 5103,
+            'garage': 5104
+        }
+        
+        if camera_name not in rtsp_port_map:
+            return jsonify({'error': f'No direct RTSP port configured for {camera_name}'}), 404
+        
+        rtsp_port = rtsp_port_map[camera_name]
+        # Include authentication credentials for camera access
+        rtsp_url = f"rtsp://admin:hiver300@localhost:{rtsp_port}/h264Preview_01_main"
+        
+        logger.info(f"Starting direct RTSP HLS conversion for {camera_name} from port {rtsp_port}")
+        
+        # Create temporary directory for HLS segments
+        hls_dir = f"/tmp/direct_hls/{camera_name}"
+        os.makedirs(hls_dir, exist_ok=True)
+        
+        playlist_path = os.path.join(hls_dir, 'playlist.m3u8')
+        
+        # Start FFmpeg process to convert RTSP to HLS
+        def start_direct_hls_conversion():
+            try:
+                cmd = [
+                    'ffmpeg',
+                    '-f', 'rtsp',
+                    '-rtsp_transport', 'tcp',
+                    '-i', rtsp_url,
+                    '-c:v', 'copy',              # Copy video codec (faster)
+                    '-an',                       # No audio for now (avoids codec issues)
+                    '-f', 'hls',                # HLS format
+                    '-hls_time', '2',           # 2 second segments
+                    '-hls_list_size', '3',      # Keep 3 segments
+                    '-hls_flags', 'delete_segments+append_list',
+                    '-hls_segment_filename', os.path.join(hls_dir, 'segment_%03d.ts'),
+                    playlist_path
+                ]
+                
+                logger.info(f"Starting FFmpeg for {camera_name}: {' '.join(cmd)}")
+                
+                # Start FFmpeg process
+                process = subprocess.Popen(
+                    cmd, 
+                    stdout=subprocess.PIPE, 
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+                
+                # Wait a moment for FFmpeg to create initial segments
+                time.sleep(3)
+                
+            except Exception as e:
+                logger.error(f"Error starting HLS conversion for {camera_name}: {e}")
+        
+        # Start conversion in background thread with app context
+        with current_app.app_context():
+            conversion_thread = threading.Thread(target=start_direct_hls_conversion)
+            conversion_thread.daemon = True
+            conversion_thread.start()
+        
+        # Wait for playlist to be created
+        max_wait = 10  # seconds
+        wait_count = 0
+        while not os.path.exists(playlist_path) and wait_count < max_wait:
+            time.sleep(1)
+            wait_count += 1
+        
+        if not os.path.exists(playlist_path):
+            return jsonify({'error': 'Failed to create HLS playlist'}), 500
+        
+        # Read and serve the playlist
+        with open(playlist_path, 'r') as f:
+            playlist_content = f.read()
+        
+        # Update segment paths to point to our API endpoint
+        lines = playlist_content.split('\n')
+        corrected_lines = []
+        for line in lines:
+            if line.endswith('.ts'):
+                corrected_lines.append(f'/api/{camera_name}/direct-hls-segments/{line}')
+            else:
+                corrected_lines.append(line)
+        
+        return '\n'.join(corrected_lines), 200, {
+            'Content-Type': 'application/vnd.apple.mpegurl',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0',
+            'Access-Control-Allow-Origin': '*'
+        }
+        
+    except Exception as e:
+        logger.error(f"Direct RTSP HLS error for {camera_name}: {str(e)}")
+        return jsonify({'error': f'Direct RTSP HLS error: {str(e)}'}), 500
+
+@bp.route('/<camera_name>/direct-hls-segments/<path:segment_name>', methods=['GET'])
+def get_direct_hls_segment(camera_name, segment_name):
+    """Serve HLS segments for direct RTSP conversion"""
+    try:
+        hls_dir = f"/tmp/direct_hls/{camera_name}"
+        segment_path = os.path.join(hls_dir, segment_name)
+        
+        if not os.path.exists(segment_path):
+            return jsonify({'error': 'Segment not found'}), 404
+        
+        with open(segment_path, 'rb') as f:
+            segment_data = f.read()
+        
+        return segment_data, 200, {
+            'Content-Type': 'video/mp2t',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0',
+            'Access-Control-Allow-Origin': '*'
+        }
+        
+    except Exception as e:
+        logger.error(f"Direct HLS segment error: {str(e)}")
+        return jsonify({'error': 'Segment error'}), 500

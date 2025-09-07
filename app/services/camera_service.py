@@ -26,6 +26,7 @@ class CameraService:
         
         # Configuration
         self.external_ip = self.config.get('EXTERNAL_IP', '24.147.52.91')
+        self.frigate_host = self.config.get('FRIGATE_HOST', 'localhost:5000')
         
         # Port forwarding state
         self.rtsp_forwarding_active = False
@@ -438,3 +439,64 @@ class CameraService:
             logger.error(f"Error getting used proxy ports: {e}")
         
         return used_ports
+    
+    def get_camera_list(self):
+        """Get list of available camera names from Frigate
+        
+        Returns:
+            List of camera names
+        """
+        try:
+            from app.services.frigate_service import FrigateService
+            frigate_service = FrigateService()
+            return frigate_service.get_camera_names()
+        except Exception as e:
+            logger.error(f"Error getting camera list: {e}")
+            return []
+    
+    def capture_snapshot(self, camera_name):
+        """Capture HD snapshot from camera using Frigate API
+        
+        Args:
+            camera_name: Name of the camera to capture from
+            
+        Returns:
+            Dictionary with success status and image data
+        """
+        try:
+            import base64
+            
+            # Use Frigate's snapshot API - construct URL
+            frigate_url = f"http://{self.frigate_host}/api/{camera_name}/latest.jpg"
+            
+            # Make request to Frigate
+            response = requests.get(frigate_url, timeout=10)
+            
+            if response.status_code == 200:
+                # Convert image to base64 for consistency with expected format
+                image_base64 = base64.b64encode(response.content).decode('utf-8')
+                
+                logger.info(f"Successfully captured snapshot from {camera_name}")
+                return {
+                    'success': True,
+                    'image_data': f'data:image/jpeg;base64,{image_base64}'
+                }
+            else:
+                logger.error(f"Failed to capture snapshot from {camera_name}: HTTP {response.status_code}")
+                return {
+                    'success': False,
+                    'error': f'HTTP {response.status_code} from Frigate API'
+                }
+                
+        except requests.Timeout:
+            logger.error(f"Timeout capturing snapshot from {camera_name}")
+            return {
+                'success': False,
+                'error': 'Timeout connecting to Frigate'
+            }
+        except Exception as e:
+            logger.error(f"Error capturing snapshot from {camera_name}: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }

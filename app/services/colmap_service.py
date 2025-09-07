@@ -80,7 +80,8 @@ class COLMAPProgressTracker:
             
             # Feature matching progress - enhanced patterns from legacy
             elif ('pairing.cc' in line_content or 'feature_matching.cc' in line_content or 
-                  'matcher.cc' in line_content or 'matching' in line_content.lower()):
+                  'matcher.cc' in line_content or 'matching' in line_content.lower() or
+                  'sequential_matcher' in line_content.lower()):
                 patterns = [
                     r'Matching image \[(\d+)/(\d+)\]',  # Main COLMAP pattern
                     r'Matched (\d+)/(\d+) image pairs',
@@ -88,7 +89,26 @@ class COLMAPProgressTracker:
                     r'Processed (\d+)/(\d+) pairs',
                     r'Sequential matching.*(\d+)/(\d+)',
                     r'Loop closure.*(\d+)/(\d+)',
+                    r'Block \[(\d+)/(\d+)\]',  # Block matching pattern
+                    r'Pairs \[(\d+)/(\d+)\]',  # Pair matching pattern
                 ]
+                
+                # Special handling for sequential matcher initialization
+                if 'Feature matching & geometric verification' in line_content:
+                    # Starting feature matching
+                    self.progress['feature_matching']['current'] = 0
+                    self.progress['feature_matching']['total'] = 605  # Approximate for 606 images
+                    self.progress['feature_matching']['percent'] = 0
+                    return
+                    
+                # Count "in 0.000s" messages as progress (each represents a matched pair)
+                if 'feature_matching.cc' in line_content and 'in 0.' in line_content:
+                    self.progress['feature_matching']['current'] += 1
+                    if self.progress['feature_matching']['total'] > 0:
+                        self.progress['feature_matching']['percent'] = min(100, int(
+                            (self.progress['feature_matching']['current'] / self.progress['feature_matching']['total']) * 100
+                        ))
+                    return
                 
                 for pattern in patterns:
                     match = re.search(pattern, line_content)
@@ -102,7 +122,7 @@ class COLMAPProgressTracker:
             
             # Sparse reconstruction progress - enhanced patterns from legacy
             elif ('mapper.cc' in line_content or 'incremental_mapper.cc' in line_content or 
-                  'reconstruction.cc' in line_content):
+                  'reconstruction.cc' in line_content or 'mapper' in line_content.lower()):
                 patterns = [
                     r'Registering image \[(\d+)/(\d+)\]',  # Main COLMAP pattern
                     r'Registered images: (\d+)/(\d+)',
@@ -110,7 +130,29 @@ class COLMAPProgressTracker:
                     r'Triangulating (\d+)/(\d+)',
                     r'=> Triangulated (\d+) points',
                     r'Bundle adjustment.*(\d+)/(\d+)',
+                    r'Image #(\d+) \((\d+)\)',  # Image registration pattern
+                    r'Registered (\d+) images',
+                    r'Initialization.*(\d+) images',
                 ]
+                
+                # Special handling for mapper initialization
+                if 'Loading database' in line_content:
+                    self.progress['sparse_reconstruction']['current'] = 0
+                    self.progress['sparse_reconstruction']['total'] = 606  # Total images
+                    self.progress['sparse_reconstruction']['percent'] = 0
+                    return
+                    
+                # Track registered images
+                if '=> Registered images:' in line_content:
+                    match = re.search(r'=> Registered images: (\d+)', line_content)
+                    if match:
+                        current = int(match.group(1))
+                        self.progress['sparse_reconstruction']['current'] = current
+                        if self.progress['sparse_reconstruction']['total'] > 0:
+                            self.progress['sparse_reconstruction']['percent'] = min(100, int(
+                                (current / self.progress['sparse_reconstruction']['total']) * 100
+                            ))
+                        return
                 
                 for pattern in patterns:
                     match = re.search(pattern, line_content)
@@ -288,12 +330,13 @@ class COLMAPService:
                 self.global_progress_state['session_id'] = session_id
                 self.global_progress_state['last_updated'] = datetime.now().isoformat()
     
-    def run_colmap_with_progress(self, cmd, session_id):
+    def run_colmap_with_progress(self, cmd, session_id, mark_complete=True):
         """Run COLMAP command with progress tracking
         
         Args:
             cmd: Command to run (list of arguments)
             session_id: Session ID for progress tracking
+            mark_complete: Whether to mark session as complete when done (default True)
             
         Returns:
             True if successful, False otherwise
@@ -357,15 +400,17 @@ class COLMAPService:
             # Wait for process to complete
             return_code = process.wait()
             
-            # Mark as completed
-            tracker.completed = True
-            self.update_global_progress(session_id)
+            # Mark as completed only if requested
+            if mark_complete:
+                tracker.completed = True
+                self.update_global_progress(session_id)
             
             return return_code == 0
             
         except Exception as e:
             logger.error(f"Error running COLMAP with progress: {e}")
-            tracker.completed = True
+            if mark_complete:
+                tracker.completed = True
             return False
     
     def run_feature_extraction(self, project_dir, session_id=None):
@@ -420,6 +465,11 @@ class COLMAPService:
             database_path = os.path.join(project_dir, 'database.db')
             images_dir = os.path.join(project_dir, 'images')
             
+            # Step 1: Feature Extraction
+            tracker = self.get_session(session_id)
+            if tracker:
+                tracker.current_phase = 'feature_extraction'
+            
             cmd = [
                 'colmap', 'feature_extractor',
                 '--database_path', database_path,
@@ -428,9 +478,26 @@ class COLMAPService:
             ]
             
             logger.info(f"Starting feature extraction for project: {project_dir}")
-            success = self.run_colmap_with_progress(cmd, session_id)
+            success = self.run_colmap_with_progress(cmd, session_id, mark_complete=False)
             
-            # Update completion status
+            if success:
+                # Step 2: Feature Matching (automatically after extraction)
+                logger.info(f"Feature extraction completed, starting feature matching for project: {project_dir}")
+                
+                tracker = self.get_session(session_id)
+                if tracker:
+                    tracker.current_phase = 'feature_matching'
+                    tracker.completed = False  # Ensure not marked as complete yet
+                
+                cmd = [
+                    'colmap', 'sequential_matcher',
+                    '--database_path', database_path,
+                    '--FeatureMatching.use_gpu', '1'
+                ]
+                
+                success = self.run_colmap_with_progress(cmd, session_id, mark_complete=False)
+            
+            # Update completion status only after both steps are done
             tracker = self.get_session(session_id)
             if tracker:
                 tracker.completed = True
@@ -498,7 +565,15 @@ class COLMAPService:
             'colmap', 'mapper',
             '--database_path', database_path,
             '--image_path', images_dir,
-            '--output_path', sparse_dir
+            '--output_path', sparse_dir,
+            '--Mapper.min_num_matches', '15',  # Lower threshold for video frames
+            '--Mapper.ignore_watermarks', '1',
+            '--Mapper.multiple_models', '0',
+            '--Mapper.extract_colors', '0',
+            '--Mapper.ba_refine_focal_length', '0',  # Video has fixed focal length
+            '--Mapper.ba_refine_principal_point', '0',  # Video has fixed principal point
+            '--Mapper.init_min_num_inliers', '50',  # Lower for video sequences
+            '--Mapper.abs_pose_min_num_inliers', '20'  # Lower for video sequences
         ]
         
         logger.info(f"Starting sparse reconstruction for project: {project_dir}")
@@ -541,12 +616,20 @@ class COLMAPService:
             matching_success = self.run_colmap_with_progress(matching_cmd, session_id)
             
             if matching_success:
-                # Then run sparse reconstruction
+                # Then run sparse reconstruction with optimized parameters for video
                 sparse_cmd = [
                     'colmap', 'mapper',
                     '--database_path', database_path,
                     '--image_path', images_dir,
-                    '--output_path', sparse_dir
+                    '--output_path', sparse_dir,
+                    '--Mapper.min_num_matches', '15',  # Lower threshold for video frames
+                    '--Mapper.ignore_watermarks', '1',
+                    '--Mapper.multiple_models', '0',
+                    '--Mapper.extract_colors', '0',
+                    '--Mapper.ba_refine_focal_length', '0',  # Video has fixed focal length
+                    '--Mapper.ba_refine_principal_point', '0',  # Video has fixed principal point
+                    '--Mapper.init_min_num_inliers', '50',  # Lower for video sequences
+                    '--Mapper.abs_pose_min_num_inliers', '20'  # Lower for video sequences
                 ]
                 
                 logger.info(f"Starting sparse reconstruction for project: {project_dir}")

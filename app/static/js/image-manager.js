@@ -381,8 +381,10 @@ class ImageManager {
             snapshot.style.display = 'none';
             video.style.display = 'block';
             
-            // Try multiple streaming approaches (direct RTSP conversion)
+            // Try multiple streaming approaches (direct RTSP conversion first)
             const streamUrls = [
+                // Direct RTSP to HLS conversion using forwarded ports (best quality)
+                `/api/${this.currentFullscreenCamera}/direct-rtsp-hls`,
                 // Direct RTSP to HLS conversion (bypasses Frigate)
                 `/api/${this.currentFullscreenCamera}/direct-stream.m3u8`,
                 // HLS stream via Frigate proxy (backup)

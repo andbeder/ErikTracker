@@ -1369,3 +1369,39 @@ window.removeCamera = async function(cameraName) {
         alert(`Failed to remove camera "${cameraName}": ${error.message}`);
     }
 };
+
+// Force enable sparse reconstruction function
+window.forceEnableSparseReconstruction = function() {
+    console.log('Force enabling sparse reconstruction button...');
+    
+    if (window.colmapManager) {
+        // Manually set the processing state to indicate feature extraction is complete
+        window.colmapManager.processingState.featureExtraction = true;
+        
+        // Enable the sparse reconstruction button
+        const sparseBtn = document.getElementById('sparseReconstructionBtn');
+        if (sparseBtn) {
+            sparseBtn.disabled = false;
+            sparseBtn.style.opacity = '1';
+            console.log('Sparse reconstruction button enabled');
+            
+            // Show success message
+            if (window.Utils) {
+                window.Utils.showToast('✅ Sparse reconstruction button enabled', 'success');
+            }
+        } else {
+            console.error('Sparse reconstruction button not found');
+        }
+        
+        // Hide the force enable button since it's no longer needed
+        const forceBtn = document.getElementById('forceEnableBtn');
+        if (forceBtn) {
+            forceBtn.style.display = 'none';
+        }
+    } else {
+        console.error('colmapManager not initialized!');
+        if (window.Utils) {
+            window.Utils.showToast('❌ COLMAP manager not initialized', 'error');
+        }
+    }
+};

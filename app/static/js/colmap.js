@@ -1530,6 +1530,12 @@ class ColmapManager {
                 extractBtn.textContent = '⏳ Extracting frames...';
             }
             
+            // Get frame interval and inject camera frames settings
+            const frameInterval = document.getElementById('frameInterval')?.value || '60';
+            const injectCameraFrames = document.getElementById('injectCameraFrames')?.checked || false;
+            
+            console.log(`Extracting with interval: ${frameInterval}, inject camera frames: ${injectCameraFrames}`);
+            
             // Make API call to extract frames from ALL uploaded videos
             const response = await fetch('/api/colmap/extract-frames-all', {
                 method: 'POST',
@@ -1538,31 +1544,52 @@ class ColmapManager {
                 },
                 body: JSON.stringify({
                     project_dir: '/home/andrew/nvr/colmap_projects/current_reconstruction',
-                    fps: 1  // Extract 1 frame per second by default
+                    fps: parseFloat(frameInterval),
+                    inject_camera_frames: injectCameraFrames
                 })
             });
             
             const result = await response.json();
             
             if (response.ok && result.status === 'success') {
-                const totalFrames = result.total_frames_extracted || 0;
+                const videoFrames = result.total_frames_extracted || 0;
+                const cameraFrames = result.camera_frames_extracted || 0;
+                const totalFrames = result.total_all_frames || videoFrames + cameraFrames;
                 const videosProcessed = result.videos_processed || 0;
                 const extractionResults = result.extraction_results || [];
+                const cameraResults = result.camera_results || [];
                 
                 // Create detailed success message
-                let message = `✅ Extracted ${totalFrames} frames from ${videosProcessed} video(s)!`;
+                let message = `✅ Extracted ${totalFrames} total frames!`;
+                if (videoFrames > 0) {
+                    message += `\n📹 Video frames: ${videoFrames} from ${videosProcessed} video(s)`;
+                }
+                if (cameraFrames > 0) {
+                    message += `\n📸 Camera frames: ${cameraFrames} from security cameras`;
+                }
+                
                 if (extractionResults.length > 0) {
                     const videoDetails = extractionResults
                         .filter(r => r.status === 'success')
                         .map(r => `${r.video}: ${r.frames_extracted} frames`)
                         .join(', ');
                     if (videoDetails) {
-                        message += `\n${videoDetails}`;
+                        message += `\nVideo details: ${videoDetails}`;
+                    }
+                }
+                
+                if (cameraResults.length > 0) {
+                    const successfulCameras = cameraResults
+                        .filter(r => r.status === 'success')
+                        .map(r => r.camera)
+                        .join(', ');
+                    if (successfulCameras) {
+                        message += `\nCamera frames: ${successfulCameras}`;
                     }
                 }
                 
                 Utils.showToast(message, 'success');
-                console.log('Frame extraction results:', extractionResults);
+                console.log('Frame extraction results:', { extractionResults, cameraResults });
                 
                 // Update workflow status
                 const frameStatus = document.getElementById('frameStatus');
@@ -1578,7 +1605,17 @@ class ColmapManager {
                 
                 // Update button to show frame count
                 if (extractBtn) {
-                    extractBtn.textContent = `📹 ${totalFrames} Frames Ready (${videosProcessed} videos)`;
+                    let buttonText = `📹 ${totalFrames} Frames Ready`;
+                    if (videosProcessed > 0) {
+                        buttonText += ` (${videosProcessed} videos`;
+                        if (cameraFrames > 0) {
+                            buttonText += ` + ${cameraFrames} cameras`;
+                        }
+                        buttonText += ')';
+                    } else if (cameraFrames > 0) {
+                        buttonText += ` (${cameraFrames} cameras)`;
+                    }
+                    extractBtn.textContent = buttonText;
                 }
             } else {
                 throw new Error(result.error || 'Frame extraction failed');
@@ -2009,6 +2046,16 @@ class ColmapManager {
             if (progressContainer) {
                 progressContainer.style.display = 'block';
             }
+        } else if (phase === 'feature_matching') {
+            // Hide feature extraction, show feature matching
+            const featureProgressContainer = document.getElementById('featureProgress');
+            const matchingProgressContainer = document.getElementById('matchingProgress');
+            if (featureProgressContainer) {
+                featureProgressContainer.style.display = 'none';
+            }
+            if (matchingProgressContainer) {
+                matchingProgressContainer.style.display = 'block';
+            }
             
             // Update button state
             const featureBtn = document.getElementById('featureExtractionBtn');
@@ -2074,7 +2121,8 @@ class ColmapManager {
      * Update progress UI elements with enhanced legacy-style tracking
      */
     updateProgressUI(progress) {
-        const phase = this.currentPhase || 'feature_extraction';
+        // Use the current phase from the progress response, or fall back to stored phase
+        const phase = progress.current_phase || this.currentPhase || 'feature_extraction';
         const progressData = progress.progress?.[phase];
         if (!progressData) return;
         
@@ -2113,6 +2161,46 @@ class ColmapManager {
             const featureBtn = document.getElementById('featureExtractionBtn');
             if (featureBtn && progressData.percent > 0) {
                 featureBtn.textContent = `⏳ Extracting features... ${progressData.percent}%`;
+            }
+            
+        } else if (phase === 'feature_matching') {
+            // Hide feature extraction progress, show feature matching progress
+            const featureProgressContainer = document.getElementById('featureProgress');
+            const matchingProgressContainer = document.getElementById('matchingProgress');
+            
+            if (featureProgressContainer) {
+                featureProgressContainer.style.display = 'none';
+            }
+            if (matchingProgressContainer) {
+                matchingProgressContainer.style.display = 'block';
+            }
+            
+            // Update progress bar fill
+            const progressFill = document.querySelector('#matchingProgress .progress-fill');
+            if (progressFill) {
+                progressFill.style.width = `${progressData.percent}%`;
+            }
+            
+            // Update progress percentage
+            const progressPercentage = document.querySelector('#matchingProgress .progress-percentage');
+            if (progressPercentage) {
+                progressPercentage.textContent = `${progressData.percent}%`;
+            }
+            
+            // Update progress details
+            const progressDetails = document.getElementById('matchingDetails');
+            if (progressDetails) {
+                if (progressData.total > 0) {
+                    progressDetails.textContent = `Matched ${progressData.current}/${progressData.total} image pairs`;
+                } else {
+                    progressDetails.textContent = `Processing image pairs...`;
+                }
+            }
+            
+            // Update button text
+            const featureBtn = document.getElementById('featureExtractionBtn');
+            if (featureBtn && progressData.percent > 0) {
+                featureBtn.textContent = `⏳ Matching features... ${progressData.percent}%`;
             }
             
         } else if (phase === 'sparse_reconstruction') {
@@ -2168,8 +2256,8 @@ class ColmapManager {
     onProcessComplete() {
         const phase = this.currentPhase || 'feature_extraction';
         
-        if (phase === 'feature_extraction') {
-            Utils.showToast('✅ Feature extraction completed successfully!', 'success');
+        if (phase === 'feature_extraction' || phase === 'feature_matching') {
+            Utils.showToast('✅ Feature extraction and matching completed successfully!', 'success');
             
             // Update workflow status
             const featureStatus = document.getElementById('featureStatus');
@@ -2177,10 +2265,14 @@ class ColmapManager {
                 featureStatus.textContent = '✅';
             }
             
-            // Hide progress bar
-            const progressContainer = document.getElementById('featureProgress');
-            if (progressContainer) {
-                progressContainer.style.display = 'none';
+            // Hide both progress bars
+            const featureProgressContainer = document.getElementById('featureProgress');
+            const matchingProgressContainer = document.getElementById('matchingProgress');
+            if (featureProgressContainer) {
+                featureProgressContainer.style.display = 'none';
+            }
+            if (matchingProgressContainer) {
+                matchingProgressContainer.style.display = 'none';
             }
             
             // Reset button state
@@ -2195,6 +2287,9 @@ class ColmapManager {
             if (sparseBtn) {
                 sparseBtn.disabled = false;
             }
+            
+            // Update processing state
+            this.processingState.featureExtraction = true;
         } else if (phase === 'sparse_reconstruction') {
             Utils.showToast('✅ Sparse reconstruction completed successfully!', 'success');
             
@@ -2281,6 +2376,11 @@ class ColmapManager {
             console.log('Showed model-selection section');
         }
         
+        // Show camera transform section if models exist
+        if (models.length > 0) {
+            this.showCameraTransformSection(models);
+        }
+        
         // Clear existing content
         modelContainer.innerHTML = '';
         
@@ -2317,6 +2417,10 @@ class ColmapManager {
                         <div class="stat-row">
                             <span>Registered Images:</span>
                             <strong>${model.registered_images}/${model.images}</strong>
+                        </div>
+                        <div class="stat-row">
+                            <span>Camera Frames:</span>
+                            <strong>${model.camera_frames_registered || 0}/${model.camera_frames || 0}</strong>
                         </div>
                         <div class="stat-row">
                             <span>3D Points:</span>
@@ -2599,6 +2703,227 @@ class ColmapManager {
     }
     
     /**
+     * Show camera transform section after sparse reconstruction
+     */
+    showCameraTransformSection(models) {
+        const cameraTransformSection = document.getElementById('cameraTransformSection');
+        if (!cameraTransformSection) {
+            console.error('Camera transform section not found');
+            return;
+        }
+        
+        // Find models with camera frames
+        const modelsWithCameras = models.filter(model => (model.camera_frames || 0) > 0);
+        
+        if (modelsWithCameras.length > 0) {
+            cameraTransformSection.style.display = 'block';
+            this.populateCameraDropdown(modelsWithCameras);
+            console.log('Showed camera transform section');
+        }
+    }
+    
+    /**
+     * Populate camera dropdown with available cameras from reconstruction
+     */
+    async populateCameraDropdown(models) {
+        try {
+            // Get available cameras from camera service
+            const response = await fetch('/frigate/cameras');
+            const result = await response.json();
+            
+            if (response.ok && result.cameras) {
+                const cameraSelect = document.getElementById('transformCameraSelect');
+                if (!cameraSelect) return;
+                
+                // Clear existing options except the first one
+                cameraSelect.innerHTML = '<option value="">Choose a camera...</option>';
+                
+                // Add cameras that might have frames in the reconstruction
+                const cameras = result.cameras;
+                cameras.forEach(cameraName => {
+                    const option = document.createElement('option');
+                    option.value = cameraName;
+                    option.textContent = cameraName.replace('_', ' ').toUpperCase();
+                    cameraSelect.appendChild(option);
+                });
+                
+                // Enable dropdown selection
+                cameraSelect.addEventListener('change', () => {
+                    const generateBtn = document.getElementById('generateTransformBtn');
+                    if (generateBtn) {
+                        generateBtn.disabled = !cameraSelect.value;
+                    }
+                });
+                
+                console.log(`Populated camera dropdown with ${cameras.length} cameras`);
+            }
+        } catch (error) {
+            console.error('Error populating camera dropdown:', error);
+        }
+    }
+    
+    /**
+     * Generate transform matrix for selected camera
+     */
+    async generateTransformMatrix() {
+        const cameraSelect = document.getElementById('transformCameraSelect');
+        const generateBtn = document.getElementById('generateTransformBtn');
+        const savePoseBtn = document.getElementById('savePoseBtn');
+        const statusDiv = document.getElementById('transformStatus');
+        const resultDiv = document.getElementById('transformMatrixResult');
+        const matrixDisplay = document.getElementById('matrixDisplay');
+        
+        if (!cameraSelect || !cameraSelect.value) {
+            Utils.showToast('Please select a camera first', 'error');
+            return;
+        }
+        
+        const selectedCamera = cameraSelect.value;
+        
+        try {
+            // Update UI
+            if (generateBtn) {
+                generateBtn.disabled = true;
+                generateBtn.textContent = '⏳ Generating...';
+            }
+            if (statusDiv) {
+                statusDiv.textContent = 'Searching for camera in COLMAP reconstruction...';
+                statusDiv.className = 'processing-status running';
+            }
+            
+            // Call API to generate transform matrix
+            const response = await fetch('/api/orient/estimate-camera-pose', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    camera_name: selectedCamera
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (response.ok && result.success) {
+                // Display transform matrix
+                if (matrixDisplay && result.pose_data && result.pose_data.transformation_matrix) {
+                    const matrix = result.pose_data.transformation_matrix;
+                    matrixDisplay.textContent = JSON.stringify(matrix, null, 2);
+                    
+                    if (resultDiv) {
+                        resultDiv.style.display = 'block';
+                    }
+                }
+                
+                // Store result for saving
+                this.currentTransformMatrix = result.pose_data;
+                this.currentTransformCamera = selectedCamera;
+                
+                // Enable save button
+                if (savePoseBtn) {
+                    savePoseBtn.disabled = false;
+                }
+                
+                if (statusDiv) {
+                    statusDiv.textContent = `✅ Transform matrix generated for ${selectedCamera}`;
+                    statusDiv.className = 'processing-status success';
+                }
+                
+                Utils.showToast(`✅ Transform matrix generated for ${selectedCamera}`, 'success');
+                
+            } else {
+                throw new Error(result.error || 'Failed to generate transform matrix');
+            }
+            
+        } catch (error) {
+            console.error('Transform matrix generation error:', error);
+            
+            if (statusDiv) {
+                statusDiv.textContent = `❌ Failed: ${error.message}`;
+                statusDiv.className = 'processing-status error';
+            }
+            
+            Utils.showToast(`❌ Transform matrix generation failed: ${error.message}`, 'error');
+            
+        } finally {
+            // Reset button
+            if (generateBtn) {
+                generateBtn.disabled = false;
+                generateBtn.textContent = '📐 Generate Transform Matrix';
+            }
+        }
+    }
+    
+    /**
+     * Save pose transformation matrix
+     */
+    async savePose() {
+        if (!this.currentTransformMatrix || !this.currentTransformCamera) {
+            Utils.showToast('Please generate a transform matrix first', 'error');
+            return;
+        }
+        
+        const savePoseBtn = document.getElementById('savePoseBtn');
+        const statusDiv = document.getElementById('transformStatus');
+        
+        try {
+            // Update UI
+            if (savePoseBtn) {
+                savePoseBtn.disabled = true;
+                savePoseBtn.textContent = '⏳ Saving...';
+            }
+            if (statusDiv) {
+                statusDiv.textContent = 'Saving camera pose...';
+                statusDiv.className = 'processing-status running';
+            }
+            
+            // Call API to save pose
+            const response = await fetch('/api/orient/save-camera-pose', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    camera_name: this.currentTransformCamera,
+                    transformation_matrix: this.currentTransformMatrix.transformation_matrix,
+                    translation: this.currentTransformMatrix.translation || [0, 0, 0]
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (response.ok && result.success) {
+                if (statusDiv) {
+                    statusDiv.textContent = `✅ Pose saved for ${this.currentTransformCamera}`;
+                    statusDiv.className = 'processing-status success';
+                }
+                
+                Utils.showToast(`✅ Camera pose saved for ${this.currentTransformCamera}`, 'success');
+                
+            } else {
+                throw new Error(result.error || 'Failed to save pose');
+            }
+            
+        } catch (error) {
+            console.error('Save pose error:', error);
+            
+            if (statusDiv) {
+                statusDiv.textContent = `❌ Save failed: ${error.message}`;
+                statusDiv.className = 'processing-status error';
+            }
+            
+            Utils.showToast(`❌ Failed to save pose: ${error.message}`, 'error');
+            
+        } finally {
+            // Reset button
+            if (savePoseBtn) {
+                savePoseBtn.disabled = true;
+                savePoseBtn.textContent = '💾 Save Pose';
+            }
+        }
+    }
+    
+    /**
      * Manually trigger model analysis (for debugging)
      */
     async manualModelAnalysis() {
@@ -2677,5 +3002,18 @@ window.refreshModels = function() {
 window.loadModelAnalysis = function() {
     if (window.colmapManager) {
         window.colmapManager.analyzeAndDisplayModels();
+    }
+};
+
+// Global functions for camera transform matrix
+window.generateTransformMatrix = function() {
+    if (window.colmapManager) {
+        window.colmapManager.generateTransformMatrix();
+    }
+};
+
+window.savePose = function() {
+    if (window.colmapManager) {
+        window.colmapManager.savePose();
     }
 };

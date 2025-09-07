@@ -186,6 +186,7 @@ def extract_frames():
         video_files = data.get('video_files')  # Now expects a list
         project_dir = data.get('project_dir')
         fps = float(data.get('fps', 1))  # Convert to float to handle both int and decimal values
+        inject_camera_frames = data.get('inject_camera_frames', False)  # New parameter
         
         # Handle backward compatibility - if single video_file provided, convert to list
         if not video_files:
@@ -268,15 +269,81 @@ def extract_frames():
                     'error': str(video_error)
                 })
         
+        # Inject camera frames if requested
+        camera_frames_extracted = 0
+        camera_results = []
+        
+        if inject_camera_frames:
+            try:
+                # Get available cameras from Frigate
+                from app.services.camera_service import CameraService
+                camera_service = CameraService()
+                cameras = camera_service.get_camera_list()
+                
+                logger.info(f"Injecting camera frames from {len(cameras)} cameras")
+                
+                for camera_name in cameras:
+                    try:
+                        # Capture HD snapshot from camera
+                        snapshot_result = camera_service.capture_snapshot(camera_name)
+                        
+                        if snapshot_result.get('success'):
+                            # Save snapshot to images directory
+                            camera_image_path = os.path.join(images_dir, f'{camera_name}.jpg')
+                            
+                            # Decode base64 image and save
+                            import base64
+                            image_data = snapshot_result['image_data'].split(',')[1]  # Remove data:image/jpeg;base64, prefix
+                            with open(camera_image_path, 'wb') as f:
+                                f.write(base64.b64decode(image_data))
+                            
+                            camera_frames_extracted += 1
+                            camera_results.append({
+                                'camera': camera_name,
+                                'status': 'success',
+                                'path': camera_image_path
+                            })
+                            logger.info(f"Successfully captured frame from {camera_name}")
+                        else:
+                            camera_results.append({
+                                'camera': camera_name,
+                                'status': 'failed',
+                                'error': snapshot_result.get('error', 'Unknown error')
+                            })
+                            logger.warning(f"Failed to capture frame from {camera_name}: {snapshot_result.get('error', 'Unknown error')}")
+                            
+                    except Exception as camera_error:
+                        camera_results.append({
+                            'camera': camera_name,
+                            'status': 'error',
+                            'error': str(camera_error)
+                        })
+                        logger.error(f"Error capturing frame from {camera_name}: {str(camera_error)}")
+                        
+            except Exception as e:
+                logger.error(f"Camera frame injection error: {str(e)}")
+                camera_results.append({
+                    'error': f"Failed to inject camera frames: {str(e)}"
+                })
+        
         # Check if any frames were extracted
-        if total_frames_extracted > 0:
-            return jsonify({
+        total_extracted = total_frames_extracted + camera_frames_extracted
+        
+        if total_extracted > 0:
+            response_data = {
                 'status': 'success',
                 'total_frames_extracted': total_frames_extracted,
+                'camera_frames_extracted': camera_frames_extracted,
+                'total_all_frames': total_extracted,
                 'videos_processed': len(video_files),
                 'extraction_results': extraction_results,
                 'project_dir': project_dir
-            })
+            }
+            
+            if inject_camera_frames:
+                response_data['camera_results'] = camera_results
+                
+            return jsonify(response_data)
         else:
             return jsonify({
                 'status': 'failed',
@@ -295,6 +362,7 @@ def extract_frames_all():
         data = request.json or {}
         project_dir = data.get('project_dir', '/home/andrew/nvr/colmap_projects/current_reconstruction')
         fps = float(data.get('fps', 1))
+        inject_camera_frames = data.get('inject_camera_frames', False)
         
         # Get list of all uploaded videos
         file_service = current_app.file_service
@@ -340,7 +408,8 @@ def extract_frames_all():
         extraction_data = {
             'video_files': video_files,
             'project_dir': project_dir,
-            'fps': fps
+            'fps': fps,
+            'inject_camera_frames': inject_camera_frames
         }
         
         # Call the extract_frames function directly
@@ -451,6 +520,8 @@ def analyze_models():
                             'cameras': 0,
                             'images': 0,
                             'registered_images': 0,
+                            'camera_frames': 0,
+                            'camera_frames_registered': 0,
                             'points': 0,
                             'observations': 0,
                             'mean_track_length': 0.0,
@@ -480,6 +551,47 @@ def analyze_models():
                                     model_info[key] = float(value)
                                 else:
                                     model_info[key] = int(value)
+                        
+                        # Count camera frames vs video frames
+                        try:
+                            # Get images directory path
+                            images_dir = os.path.join(project_dir, 'images')
+                            
+                            if os.path.exists(images_dir):
+                                # Get available cameras from camera service to identify camera frame patterns
+                                from app.services.camera_service import CameraService
+                                camera_service = CameraService()
+                                available_cameras = camera_service.get_camera_list()
+                                
+                                # Count camera frames vs video frames
+                                camera_frame_files = []
+                                total_image_files = []
+                                
+                                for filename in os.listdir(images_dir):
+                                    if filename.lower().endswith(('.jpg', '.jpeg', '.png')):
+                                        total_image_files.append(filename)
+                                        
+                                        # Check if this is a camera frame (e.g., front_door.jpg, backyard.jpg)
+                                        name_without_ext = os.path.splitext(filename)[0]
+                                        if name_without_ext in available_cameras:
+                                            camera_frame_files.append(filename)
+                                
+                                model_info['camera_frames'] = len(camera_frame_files)
+                                
+                                # To get registered camera frames, we need to parse COLMAP's images.bin
+                                # For now, estimate based on ratio of registered to total images
+                                if model_info['images'] > 0:
+                                    camera_frame_ratio = len(camera_frame_files) / len(total_image_files)
+                                    model_info['camera_frames_registered'] = int(model_info['registered_images'] * camera_frame_ratio)
+                                else:
+                                    model_info['camera_frames_registered'] = 0
+                                    
+                                current_app.logger.info(f"Model {item}: Found {len(camera_frame_files)} camera frames out of {len(total_image_files)} total images")
+                                
+                        except Exception as e:
+                            current_app.logger.warning(f"Failed to count camera frames for model {item}: {e}")
+                            model_info['camera_frames'] = 0
+                            model_info['camera_frames_registered'] = 0
                         
                         # Determine quality based on metrics
                         if model_info['mean_reprojection_error'] < 0.6:
@@ -997,6 +1109,81 @@ def get_global_progress():
     colmap_service = current_app.colmap_service
     progress = colmap_service.get_global_progress()
     return jsonify(progress)
+
+@bp.route('/process-status', methods=['GET'])
+def get_process_status():
+    """Get real-time status of running COLMAP processes"""
+    import subprocess
+    import psutil
+    import time
+    
+    try:
+        # Check for running COLMAP processes
+        processes = []
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'cpu_percent', 'memory_percent', 'create_time']):
+            try:
+                if 'colmap' in proc.info['name'].lower():
+                    cmdline = ' '.join(proc.info['cmdline']) if proc.info['cmdline'] else ''
+                    
+                    # Determine process type
+                    process_type = 'unknown'
+                    if 'feature_extractor' in cmdline:
+                        process_type = 'feature_extraction'
+                    elif 'sequential_matcher' in cmdline:
+                        process_type = 'feature_matching'
+                    elif 'mapper' in cmdline:
+                        process_type = 'sparse_reconstruction'
+                    elif 'image_undistorter' in cmdline:
+                        process_type = 'image_undistortion'
+                    elif 'patch_match_stereo' in cmdline:
+                        process_type = 'dense_stereo'
+                    elif 'stereo_fusion' in cmdline:
+                        process_type = 'dense_fusion'
+                    elif 'gui' in cmdline:
+                        continue  # Skip GUI process
+                    
+                    # Calculate runtime
+                    runtime = time.time() - proc.info['create_time']
+                    
+                    processes.append({
+                        'pid': proc.info['pid'],
+                        'type': process_type,
+                        'cpu_percent': proc.cpu_percent(),
+                        'memory_percent': round(proc.memory_percent(), 1),
+                        'runtime_seconds': int(runtime),
+                        'runtime_formatted': f"{int(runtime//60)}m {int(runtime%60)}s",
+                        'command': cmdline[:200]  # Truncate long commands
+                    })
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        
+        # Get progress from service
+        progress = current_app.colmap_service.get_global_progress()
+        
+        # Check output directories for actual progress
+        import os
+        project_dir = '/home/andrew/nvr/colmap_projects/current_reconstruction'
+        
+        # Count registered images in sparse reconstruction
+        sparse_dir = os.path.join(project_dir, 'sparse', '0')
+        sparse_images = 0
+        if os.path.exists(sparse_dir):
+            images_file = os.path.join(sparse_dir, 'images.bin')
+            if os.path.exists(images_file):
+                # Rough estimate based on file size (each image entry is ~1.2KB)
+                file_size = os.path.getsize(images_file)
+                sparse_images = max(1, file_size // 1200)
+        
+        return jsonify({
+            'success': True,
+            'processes': processes,
+            'progress': progress,
+            'sparse_images_registered': sparse_images,
+            'any_running': len(processes) > 0
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @bp.route('/start-with-progress/<phase>', methods=['POST'])
 def start_colmap_phase_with_progress(phase):
