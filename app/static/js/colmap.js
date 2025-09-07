@@ -418,7 +418,7 @@ class ColmapManager {
             showBtn.textContent = '⏳ Generating Visualization...';
             
             // Request pose visualization from backend
-            const response = await fetch('/api/colmap/render-camera-pose', {
+            const response = await fetch('/api/orient/render-camera-pose', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ camera_name: this.selectedCamera })
@@ -428,7 +428,7 @@ class ColmapManager {
             
             if (result.status === 'success') {
                 // Load visualization via web server route instead of file:// URL
-                iframe.src = `/api/colmap/visualization/${this.selectedCamera}`;
+                iframe.src = `/api/orient/visualization/${this.selectedCamera}`;
                 
                 // Show container
                 container.style.display = 'block';
@@ -511,7 +511,7 @@ class ColmapManager {
         return `
             <div class="camera-management-card" style="background: #f8f9fa; border-radius: 12px; padding: 20px; border: 1px solid #e0e0e0; position: relative;">
                 <!-- Camera Live Image -->
-                <div style="margin-bottom: 15px; position: relative; width: 100%; padding-bottom: 56.25%; /* 16:9 aspect ratio */">
+                <div style="margin-bottom: 15px; position: relative; width: 100%; padding-bottom: 75%; /* 4:3 aspect ratio */">
                     <img id="settingsCamera${camera.name}" 
                          style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 8px; background: #000;" 
                          alt="${camera.display} Camera">
@@ -613,7 +613,7 @@ class ColmapManager {
             Utils.showToast('🔍 Extracting features...', 'info');
             
             // Estimate pose
-            const poseResult = await this.api.calibrateCameraPose(cameraName);
+            const poseResult = await this.api.estimateCameraPose(cameraName);
             
             if (poseResult.success) {
                 Utils.showToast(`✅ Camera ${cameraName.replace('_', ' ')} calibrated successfully!`, 'success');
@@ -636,7 +636,7 @@ class ColmapManager {
         }
         
         try {
-            const response = await fetch(`/api/colmap/clear-camera-pose/${cameraName}`, {
+            const response = await fetch(`/api/orient/clear-camera-pose/${cameraName}`, {
                 method: 'DELETE'
             });
             

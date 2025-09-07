@@ -15,6 +15,12 @@ def generate_manual_orient_interface(pose_data, point_cloud_path):
     transformation_matrix = pose_data['transformation_matrix']
     camera_name = pose_data['camera_name']
     
+    # Extract camera configuration if available
+    camera_config = pose_data.get('camera_config', {})
+    lens_config = camera_config.get('lens', {})
+    fov = lens_config.get('horizontal_fov', 80)  # Default to 80 degrees
+    focal_length_mm = lens_config.get('focal_length_mm', 4.0)
+    
     # Load 500k points for visualization
     sample_points = load_point_cloud_sample(point_cloud_path, max_points=500000)
     
@@ -33,15 +39,17 @@ def generate_manual_orient_interface(pose_data, point_cloud_path):
             padding: 0;
             background-color: #000;
             font-family: Arial, sans-serif;
-            overflow: hidden;
+            overflow-x: hidden;
+            overflow-y: auto; /* Allow vertical scrolling */
         }}
         
         #container {{
-            width: 100vw;
-            height: 100vh;
+            width: 1068px; /* Fixed width: 533px × 2 + 2px gap = 1068px */
+            height: 802px; /* Fixed height: 400px × 2 + 2px gap = 802px */
+            margin: 0 auto;
             display: grid;
-            grid-template-columns: 1fr 1fr;
-            grid-template-rows: 1fr 1fr;
+            grid-template-columns: 533px 533px;
+            grid-template-rows: 400px 400px;
             gap: 2px;
         }}
         
@@ -49,6 +57,8 @@ def generate_manual_orient_interface(pose_data, point_cloud_path):
             position: relative;
             background: #111;
             border: 1px solid #333;
+            width: 533px; /* Hard-coded width for perfect 4:3 ratio (reduced by 1/3) */
+            height: 400px; /* Hard-coded height: 533 ÷ 4 × 3 = 400 (perfect 4:3 ratio) */
         }}
         
         .quadrant-label {{
@@ -150,7 +160,7 @@ def generate_manual_orient_interface(pose_data, point_cloud_path):
             <div class="quadrant-label">📐 Side View (Elevation)</div>
         </div>
         
-        <!-- LL: Camera perspective view -->
+        <!-- LL: Camera perspective view with point cloud -->
         <div id="cameraperspective" class="quadrant">
             <div class="quadrant-label">📹 Camera View (3D Perspective)</div>
         </div>
@@ -198,8 +208,8 @@ def generate_manual_orient_interface(pose_data, point_cloud_path):
         </div>
         <div style="margin-top: 10px; display: flex; gap: 10px; align-items: center;">
             <label style="color: #FFA726;">Camera FoV:</label>
-            <input type="range" id="fov-slider" min="10" max="180" value="90" style="flex: 1;">
-            <span id="fov-value" style="color: #4CAF50; min-width: 40px;">90°</span>
+            <input type="range" id="fov-slider" min="40" max="120" value="{fov}" style="flex: 1;">
+            <span id="fov-value" style="color: #4CAF50; min-width: 40px;">{fov}°</span>
         </div>
         
         <div style="margin-top: 15px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
@@ -238,10 +248,11 @@ def generate_manual_orient_interface(pose_data, point_cloud_path):
         // Use normal coordinates to match point cloud
         const pos = initialPose.position;
         virtualCamera.position = new THREE.Vector3(pos[0], pos[1], pos[2]);
-        virtualCamera.fov = 90;
-        virtualCamera.aspect = 16/9;
+        virtualCamera.fov = {fov}; // Camera-specific FOV from config
+        virtualCamera.aspect = 4/3;
         virtualCamera.near = 0.1;
         virtualCamera.far = 100;
+        virtualCamera.focalLength = {focal_length_mm}; // Camera-specific focal length
         
         // Movement parameters
         let moveSpeed = 0.1;
@@ -328,7 +339,7 @@ def generate_manual_orient_interface(pose_data, point_cloud_path):
             
             // Renderer
             renderers.topdown = new THREE.WebGLRenderer({{ antialias: true }});
-            renderers.topdown.setSize(container.offsetWidth, container.offsetHeight);
+            renderers.topdown.setSize(533, 400);
             container.appendChild(renderers.topdown.domElement);
             
             // Create point cloud
@@ -403,7 +414,7 @@ def generate_manual_orient_interface(pose_data, point_cloud_path):
             
             // Renderer
             renderers.cameraview = new THREE.WebGLRenderer({{ antialias: true }});
-            renderers.cameraview.setSize(container.offsetWidth, container.offsetHeight);
+            renderers.cameraview.setSize(533, 400);
             container.appendChild(renderers.cameraview.domElement);
             
             // Add point cloud
@@ -441,7 +452,7 @@ def generate_manual_orient_interface(pose_data, point_cloud_path):
             
             // Renderer
             renderers.cameraperspective = new THREE.WebGLRenderer({{ antialias: true }});
-            renderers.cameraperspective.setSize(container.offsetWidth, container.offsetHeight);
+            renderers.cameraperspective.setSize(533, 400);
             container.appendChild(renderers.cameraperspective.domElement);
             
             // Add point cloud to camera perspective view
@@ -496,7 +507,7 @@ def generate_manual_orient_interface(pose_data, point_cloud_path):
                 alpha: true 
             }});
             renderers.superimposed.setClearColor(0x000000, 0); // Transparent background
-            renderers.superimposed.setSize(container.offsetWidth, container.offsetHeight);
+            renderers.superimposed.setSize(533, 400);
             renderers.superimposed.domElement.style.cssText = `
                 position: absolute;
                 top: 0;
@@ -566,6 +577,7 @@ def generate_manual_orient_interface(pose_data, point_cloud_path):
             
             cameraHelper = new THREE.CameraHelper(helperCamera);
             cameraHelper.material.color.setHex(0x00ff00);
+            cameraHelper.update(); // Force update the helper geometry
             scenes.topdown.add(cameraHelper);
             
             // Add camera position marker
@@ -639,11 +651,11 @@ def generate_manual_orient_interface(pose_data, point_cloud_path):
                 updated = true;
             }}
             if (keys['KeyA']) {{ // Left (in camera's left direction)
-                virtualCamera.position.addScaledVector(right, -moveSpeed);
+                virtualCamera.position.addScaledVector(right, moveSpeed);
                 updated = true;
             }}
             if (keys['KeyD']) {{ // Right (in camera's right direction)
-                virtualCamera.position.addScaledVector(right, moveSpeed);
+                virtualCamera.position.addScaledVector(right, -moveSpeed);
                 updated = true;
             }}
             if (keys['KeyQ']) {{ // Up (world up)
@@ -660,12 +672,29 @@ def generate_manual_orient_interface(pose_data, point_cloud_path):
                 virtualCamera.rotation = new THREE.Euler();
             }}
             
-            if (keys['ArrowUp']) {{ // Tilt up
-                virtualCamera.rotation.x -= rotateSpeed;
+            // For pitch to work from camera's perspective, we need to apply local rotation
+            // Create a quaternion for the current rotation
+            const quaternion = new THREE.Quaternion();
+            quaternion.setFromEuler(virtualCamera.rotation);
+            
+            if (keys['ArrowUp']) {{ // Tilt up (pitch from camera's perspective)
+                // Apply pitch rotation around the camera's local X axis
+                const pitchAxis = new THREE.Vector3(1, 0, 0);
+                pitchAxis.applyQuaternion(quaternion);
+                const pitchQuat = new THREE.Quaternion();
+                pitchQuat.setFromAxisAngle(pitchAxis, -rotateSpeed);
+                quaternion.multiply(pitchQuat);
+                virtualCamera.rotation.setFromQuaternion(quaternion);
                 updated = true;
             }}
-            if (keys['ArrowDown']) {{ // Tilt down
-                virtualCamera.rotation.x += rotateSpeed;
+            if (keys['ArrowDown']) {{ // Tilt down (pitch from camera's perspective)
+                // Apply pitch rotation around the camera's local X axis
+                const pitchAxis = new THREE.Vector3(1, 0, 0);
+                pitchAxis.applyQuaternion(quaternion);
+                const pitchQuat = new THREE.Quaternion();
+                pitchQuat.setFromAxisAngle(pitchAxis, rotateSpeed);
+                quaternion.multiply(pitchQuat);
+                virtualCamera.rotation.setFromQuaternion(quaternion);
                 updated = true;
             }}
             if (keys['ArrowLeft']) {{ // Pan left
@@ -700,7 +729,7 @@ def generate_manual_orient_interface(pose_data, point_cloud_path):
             }}
             
             // UL view zoom controls (< and > keys)
-            if (keys['Comma']) {{ // < key (zoom out UL view)
+            if (keys['Comma']) {{ // < key (zoom out UL and side views)
                 if (cameras.topdown && cameras.topdown.isOrthographicCamera) {{
                     const currentSize = Math.abs(cameras.topdown.left);
                     const newSize = Math.min(currentSize * 1.1, 50); // Max zoom out
@@ -711,9 +740,19 @@ def generate_manual_orient_interface(pose_data, point_cloud_path):
                     cameras.topdown.updateProjectionMatrix();
                     updated = true;
                 }}
+                // Sync zoom to side view
+                if (cameras.cameraview && cameras.cameraview.isOrthographicCamera) {{
+                    const currentSize = Math.abs(cameras.cameraview.left);
+                    const newSize = Math.min(currentSize * 1.1, 50); // Max zoom out
+                    cameras.cameraview.left = -newSize;
+                    cameras.cameraview.right = newSize;
+                    cameras.cameraview.top = newSize;
+                    cameras.cameraview.bottom = -newSize;
+                    cameras.cameraview.updateProjectionMatrix();
+                }}
                 keys['Comma'] = false;
             }}
-            if (keys['Period']) {{ // > key (zoom in UL view)
+            if (keys['Period']) {{ // > key (zoom in UL and side views)
                 if (cameras.topdown && cameras.topdown.isOrthographicCamera) {{
                     const currentSize = Math.abs(cameras.topdown.left);
                     const newSize = Math.max(currentSize * 0.9, 0.5); // Min zoom in
@@ -723,6 +762,16 @@ def generate_manual_orient_interface(pose_data, point_cloud_path):
                     cameras.topdown.bottom = -newSize;
                     cameras.topdown.updateProjectionMatrix();
                     updated = true;
+                }}
+                // Sync zoom to side view
+                if (cameras.cameraview && cameras.cameraview.isOrthographicCamera) {{
+                    const currentSize = Math.abs(cameras.cameraview.left);
+                    const newSize = Math.max(currentSize * 0.9, 0.5); // Min zoom in
+                    cameras.cameraview.left = -newSize;
+                    cameras.cameraview.right = newSize;
+                    cameras.cameraview.top = newSize;
+                    cameras.cameraview.bottom = -newSize;
+                    cameras.cameraview.updateProjectionMatrix();
                 }}
                 keys['Period'] = false;
             }}
@@ -740,6 +789,8 @@ def generate_manual_orient_interface(pose_data, point_cloud_path):
                 updateCameraHelper();
                 updateSideViewCameraHelper();
                 updateTopDownTracking();
+                updateCameraPerspectiveView();
+                updateSuperimposedView();
                 updateStatus();
                 updateTransformationMatrix();
             }}
@@ -754,6 +805,34 @@ def generate_manual_orient_interface(pose_data, point_cloud_path):
                 
                 cameras.topdown.position.set(targetX, cameraY, targetZ);
                 cameras.topdown.lookAt(targetX, 0, targetZ); // Look down at tracked position
+            }}
+            
+            // Update side view camera to track virtual camera position
+            if (cameras.cameraview) {{
+                const targetY = virtualCamera.position.y;
+                const targetZ = virtualCamera.position.z;
+                const cameraX = cameras.cameraview.position.x; // Keep same X offset from scene
+                
+                cameras.cameraview.position.set(cameraX, targetY, targetZ);
+                cameras.cameraview.lookAt(virtualCamera.position.x + 5, targetY, targetZ); // Look toward the virtual camera position
+            }}
+        }}
+
+        function updateCameraPerspectiveView() {{
+            // Update camera perspective view (LL quadrant) to match virtual camera
+            if (cameras.cameraperspective && virtualCamera) {{
+                cameras.cameraperspective.position.copy(virtualCamera.position);
+                cameras.cameraperspective.rotation.copy(virtualCamera.rotation);
+                cameras.cameraperspective.updateProjectionMatrix();
+            }}
+        }}
+
+        function updateSuperimposedView() {{
+            // Update superimposed view (LR quadrant) camera if needed
+            if (cameras.superimposed && virtualCamera) {{
+                cameras.superimposed.position.copy(virtualCamera.position);
+                cameras.superimposed.rotation.copy(virtualCamera.rotation);
+                cameras.superimposed.updateProjectionMatrix();
             }}
         }}
 
@@ -779,6 +858,7 @@ def generate_manual_orient_interface(pose_data, point_cloud_path):
                 const sideViewCameraHelper = new THREE.CameraHelper(helperCamera);
                 sideViewCameraHelper.material.color.setHex(0x00ff00);
                 sideViewCameraHelper.name = 'sideViewCameraHelper';
+                sideViewCameraHelper.update(); // Force update the helper geometry
                 scenes.cameraview.add(sideViewCameraHelper);
                 
                 // Add camera position marker for side view
@@ -992,7 +1072,12 @@ def generate_manual_orient_interface(pose_data, point_cloud_path):
         function getTransformationMatrix() {{
             // Build transformation matrix from current camera position and rotation
             const position = virtualCamera.position;
-            const quaternion = virtualCamera.quaternion;
+            
+            // Create quaternion from Euler rotation
+            const quaternion = new THREE.Quaternion();
+            if (virtualCamera.rotation) {{
+                quaternion.setFromEuler(virtualCamera.rotation);
+            }}
             
             // Create a 4x4 transformation matrix (world-to-camera)
             const matrix = new THREE.Matrix4();
@@ -1013,9 +1098,14 @@ def generate_manual_orient_interface(pose_data, point_cloud_path):
             Object.keys(renderers).forEach(key => {{
                 const container = document.getElementById(key);
                 if (container && renderers[key]) {{
-                    renderers[key].setSize(container.offsetWidth, container.offsetHeight);
+                    renderers[key].setSize(533, 400);
                     if (cameras[key] && cameras[key].isPerspectiveCamera) {{
-                        cameras[key].aspect = container.offsetWidth / container.offsetHeight;
+                        // For camera perspective view, maintain 4:3 aspect ratio
+                        if (key === 'cameraperspective') {{
+                            cameras[key].aspect = 4/3; // Lock to 4:3 aspect ratio
+                        }} else {{
+                            cameras[key].aspect = 533 / 400; // Fixed 4:3 aspect ratio
+                        }}
                         cameras[key].updateProjectionMatrix();
                     }}
                 }}
@@ -1074,8 +1164,8 @@ def load_point_cloud_sample(point_cloud_path, max_points=500000):
                     break
                 
                 x, y, z, nx, ny, nz, r, g, b = struct.unpack('<ffffffBBB', vertex_data)
-                # Flip Y-axis to correct orientation
-                sample_points.append([x, -y, z, r, g, b])
+                # Flip X-axis and Y-axis to correct orientation for house layout
+                sample_points.append([-x, -y, z, r, g, b])
         
         logger.info(f"Successfully loaded {len(sample_points)} sample points from PLY file")
         

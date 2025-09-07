@@ -98,7 +98,7 @@ class ApiClient {
      * @param {string} camera - Camera name
      */
     async captureCameraSnapshot(camera) {
-        return this.post('/api/colmap/capture-camera-snapshot', { camera_name: camera });
+        return this.post('/api/orient/capture-camera-snapshot', { camera_name: camera });
     }
 
     /**
@@ -111,23 +111,16 @@ class ApiClient {
         if (snapshotPath) {
             data.snapshot_path = snapshotPath;
         }
-        return this.post('/api/colmap/estimate-camera-pose', data);
+        return this.post('/api/orient/estimate-camera-pose', data);
     }
 
     /**
      * Get camera poses
      */
     async getCameraPoses() {
-        return this.get('/api/colmap/camera-poses');
+        return this.get('/api/orient/camera-poses');
     }
 
-    /**
-     * Calibrate camera pose
-     * @param {string} cameraName - Camera name
-     */
-    async calibrateCameraPose(cameraName) {
-        return this.post(`/api/colmap/calibrate-camera-pose/${cameraName}`);
-    }
 
     /**
      * Get reconstruction status

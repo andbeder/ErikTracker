@@ -34,6 +34,9 @@ class YardMapManager {
         // Load saved map thumbnail on page load
         this.loadSavedMapThumbnail();
         
+        // Load active yard map in Map tab on page load
+        this.loadActiveYardMap();
+        
         // ESC key functionality for map controls
         document.addEventListener('keydown', (e) => {
             const mapContainer = document.getElementById('mapContainer');
@@ -235,7 +238,7 @@ class YardMapManager {
         this.updateViewWindowFromTransform();
         
         // Display fixed resolution
-        Utils.safeElementOperation('mapSizeDisplay', el => el.textContent = '1280 × 720 pixels (16:9)');
+        Utils.safeElementOperation('mapSizeDisplay', el => el.textContent = '1280 × 960 pixels (4:3)');
     }
 
     /**
@@ -1049,6 +1052,235 @@ class YardMapManager {
         const savedMap = localStorage.getItem('savedYardMap');
         if (savedMap) {
             this.updateSavedMapThumbnail(savedMap);
+        }
+    }
+
+    /**
+     * Load active yard map in the main Map tab
+     */
+    async loadActiveYardMap() {
+        const mapContainer = document.getElementById('yard-map-container');
+        const mapImage = document.getElementById('yard-map-image');
+        const noMapMessage = document.getElementById('no-map-message');
+        
+        if (!mapContainer || !mapImage || !noMapMessage) {
+            console.log('Map tab elements not found');
+            return;
+        }
+        
+        try {
+            // Check if active map exists
+            const infoResponse = await fetch('/api/yard-map/active-map/info');
+            
+            if (infoResponse.ok) {
+                const mapInfo = await infoResponse.json();
+                
+                // Load the actual image
+                const imageResponse = await fetch('/api/yard-map/active-map/image?t=' + Date.now());
+                
+                if (imageResponse.ok) {
+                    const blob = await imageResponse.blob();
+                    const imageUrl = URL.createObjectURL(blob);
+                    
+                    // Show the map
+                    mapImage.src = imageUrl;
+                    mapContainer.style.display = 'block';
+                    noMapMessage.style.display = 'none';
+                    
+                    // Store map info for Erik positioning
+                    this.activeMapInfo = mapInfo;
+                    
+                    console.log('Active yard map loaded successfully');
+                    
+                    // Initialize Erik tracking on the map
+                    this.initializeErikTracking();
+                } else {
+                    throw new Error('Failed to load map image');
+                }
+            } else {
+                // No active map available
+                mapContainer.style.display = 'none';
+                noMapMessage.style.display = 'block';
+                console.log('No active yard map available');
+            }
+        } catch (error) {
+            console.error('Error loading active yard map:', error);
+            mapContainer.style.display = 'none';
+            noMapMessage.style.display = 'block';
+        }
+    }
+    
+    /**
+     * Initialize Erik tracking on the loaded yard map
+     */
+    async initializeErikTracking() {
+        if (!this.activeMapInfo || !this.activeMapInfo.map_bounds) {
+            console.log('No map info available for Erik tracking');
+            return;
+        }
+        
+        // Start polling for Erik's position
+        this.startErikPositionPolling();
+    }
+    
+    /**
+     * Start polling for Erik's live position
+     */
+    startErikPositionPolling() {
+        // Clear any existing polling
+        if (this.erikPollingInterval) {
+            clearInterval(this.erikPollingInterval);
+        }
+        
+        // Poll every 2 seconds for Erik's position
+        this.erikPollingInterval = setInterval(async () => {
+            try {
+                const response = await fetch('/api/erik/live-position');
+                if (response.ok) {
+                    const position = await response.json();
+                    if (position.detected && position.camera && position.x !== null && position.y !== null) {
+                        await this.updateErikPositionOnMap(position);
+                    } else {
+                        this.hideErikDot();
+                    }
+                }
+            } catch (error) {
+                console.error('Error getting Erik position:', error);
+            }
+        }, 2000);
+        
+        console.log('Started Erik position polling');
+    }
+    
+    /**
+     * Update Erik's position on the yard map
+     */
+    async updateErikPositionOnMap(erikPosition) {
+        if (!this.activeMapInfo) return;
+        
+        try {
+            // Project Erik's camera coordinates to map coordinates
+            const response = await fetch('/api/pose/project-to-map', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    camera_name: erikPosition.camera,
+                    pixel_x: erikPosition.x,
+                    pixel_y: erikPosition.y
+                })
+            });
+            
+            if (response.ok) {
+                const mapPosition = await response.json();
+                this.showErikDot(mapPosition.map_pixel[0], mapPosition.map_pixel[1]);
+                
+                // Update status panel
+                this.updateErikStatus(erikPosition);
+            } else {
+                console.log('Camera not mapped yet:', erikPosition.camera);
+                this.hideErikDot();
+            }
+        } catch (error) {
+            console.error('Error projecting Erik position:', error);
+            this.hideErikDot();
+        }
+    }
+    
+    /**
+     * Show Erik dot at map coordinates
+     */
+    showErikDot(mapX, mapY) {
+        const erikDot = document.getElementById('erik-dot');
+        const mapImage = document.getElementById('yard-map-image');
+        
+        if (!erikDot || !mapImage) return;
+        
+        // Calculate position as percentage of image size
+        const rect = mapImage.getBoundingClientRect();
+        const percentX = mapX / this.activeMapInfo.image_width * 100;
+        const percentY = mapY / this.activeMapInfo.image_height * 100;
+        
+        erikDot.style.left = percentX + '%';
+        erikDot.style.top = percentY + '%';
+        erikDot.style.display = 'block';
+        
+        // Add to trail
+        this.addTrailPoint(percentX, percentY);
+    }
+    
+    /**
+     * Hide Erik dot
+     */
+    hideErikDot() {
+        const erikDot = document.getElementById('erik-dot');
+        if (erikDot) {
+            erikDot.style.display = 'none';
+        }
+    }
+    
+    /**
+     * Add point to Erik's movement trail
+     */
+    addTrailPoint(x, y) {
+        const trail = document.getElementById('erik-trail');
+        if (!trail) return;
+        
+        // Create trail point
+        const point = document.createElement('div');
+        point.style.cssText = `
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            background: rgba(255, 68, 68, 0.6);
+            border-radius: 50%;
+            left: ${x}%;
+            top: ${y}%;
+            transform: translate(-50%, -50%);
+            animation: fadeOut 10s forwards;
+        `;
+        
+        trail.appendChild(point);
+        
+        // Remove old trail points (keep last 20)
+        const points = trail.children;
+        if (points.length > 20) {
+            trail.removeChild(points[0]);
+        }
+        
+        // Remove point after animation
+        setTimeout(() => {
+            if (point.parentNode) {
+                point.parentNode.removeChild(point);
+            }
+        }, 10000);
+    }
+    
+    /**
+     * Update Erik status in status panel
+     */
+    updateErikStatus(position) {
+        const statusElement = document.getElementById('erik-status');
+        const lastSeenElement = document.getElementById('last-seen');
+        const cameraElement = document.getElementById('detection-camera');
+        const positionElement = document.getElementById('erik-position');
+        
+        if (statusElement) {
+            statusElement.innerHTML = '<span style="color: #28a745;">✅ Detected</span>';
+        }
+        
+        if (lastSeenElement) {
+            lastSeenElement.innerHTML = '<span style="color: #28a745;">Just now</span>';
+        }
+        
+        if (cameraElement) {
+            const cameraName = position.camera.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            cameraElement.innerHTML = `<span style="color: #17a2b8;">${cameraName}</span>`;
+        }
+        
+        if (positionElement) {
+            positionElement.innerHTML = `<span style="color: #17a2b8;">(${position.x}, ${position.y})</span>`;
         }
     }
 

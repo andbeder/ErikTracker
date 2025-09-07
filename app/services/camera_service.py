@@ -9,8 +9,11 @@ import json
 import logging
 import subprocess
 import requests
+import threading
+import signal
 from pathlib import Path
 from datetime import datetime
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +31,10 @@ class CameraService:
         self.rtsp_forwarding_active = False
         self.forwarding_process = None
         self.forwarding_ports = {}
+        
+        # Snapshot process management - ensure only one per camera
+        self.snapshot_processes = {}  # camera_id -> process
+        self.snapshot_lock = threading.Lock()
     
     def setup_rtsp_forwarding(self, local_rtsp_url, external_port=5554):
         """Set up RTSP stream forwarding for external access
@@ -210,9 +217,27 @@ class CameraService:
         Returns:
             Image data (bytes) or None if failed
         """
+        import tempfile
+        
+        # Extract camera identifier from URL for process tracking
+        parsed = urlparse(rtsp_url)
+        camera_id = f"{parsed.hostname}:{parsed.port or 554}{parsed.path}"
+        
+        with self.snapshot_lock:
+            # Check if there's already a snapshot process for this camera
+            if camera_id in self.snapshot_processes:
+                old_process = self.snapshot_processes[camera_id]
+                if old_process and old_process.poll() is None:
+                    # Kill the old hung process
+                    logger.warning(f"Killing hung snapshot process for camera {camera_id}")
+                    try:
+                        old_process.kill()
+                        old_process.wait(timeout=2)
+                    except:
+                        pass
+                del self.snapshot_processes[camera_id]
+        
         try:
-            import tempfile
-            
             with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp_file:
                 cmd = [
                     'ffmpeg',
@@ -224,24 +249,84 @@ class CameraService:
                     tmp_file.name
                 ]
                 
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=10
-                )
+                # Use Popen to track the process
+                with self.snapshot_lock:
+                    process = subprocess.Popen(
+                        cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True
+                    )
+                    self.snapshot_processes[camera_id] = process
                 
-                if result.returncode == 0 and os.path.exists(tmp_file.name):
+                try:
+                    # Wait for process with timeout
+                    stdout, stderr = process.communicate(timeout=10)
+                    returncode = process.returncode
+                except subprocess.TimeoutExpired:
+                    # Process hung - kill it
+                    logger.error(f"Snapshot process timed out for camera {camera_id}")
+                    process.kill()
+                    process.wait()
+                    returncode = -1
+                finally:
+                    # Clean up process tracking
+                    with self.snapshot_lock:
+                        if camera_id in self.snapshot_processes:
+                            del self.snapshot_processes[camera_id]
+                
+                # Read image if successful
+                if returncode == 0 and os.path.exists(tmp_file.name):
                     with open(tmp_file.name, 'rb') as f:
                         image_data = f.read()
                     
                     os.unlink(tmp_file.name)
                     return image_data
+                else:
+                    # Clean up temp file on failure
+                    if os.path.exists(tmp_file.name):
+                        os.unlink(tmp_file.name)
+                    logger.error(f"FFmpeg failed for camera {camera_id}: {stderr if returncode != -1 else 'timeout'}")
                     
         except Exception as e:
-            logger.error(f"Error getting camera snapshot: {e}")
+            logger.error(f"Error getting camera snapshot from {camera_id}: {e}")
+            # Ensure process is cleaned up on exception
+            with self.snapshot_lock:
+                if camera_id in self.snapshot_processes:
+                    try:
+                        self.snapshot_processes[camera_id].kill()
+                    except:
+                        pass
+                    del self.snapshot_processes[camera_id]
         
         return None
+    
+    def cleanup_snapshot_processes(self):
+        """Clean up any remaining snapshot processes
+        
+        This should be called on service shutdown or periodically
+        to ensure no zombie processes remain.
+        """
+        with self.snapshot_lock:
+            for camera_id, process in list(self.snapshot_processes.items()):
+                if process and process.poll() is None:
+                    logger.warning(f"Cleaning up snapshot process for camera {camera_id}")
+                    try:
+                        process.kill()
+                        process.wait(timeout=2)
+                    except:
+                        pass
+            self.snapshot_processes.clear()
+    
+    def __del__(self):
+        """Cleanup on service destruction"""
+        try:
+            self.cleanup_snapshot_processes()
+            # Also clean up any forwarding processes
+            for stream_id in list(self.forwarding_ports.keys()):
+                self.stop_rtsp_forwarding(stream_id)
+        except:
+            pass
     
     def discover_cameras(self, network_range='192.168.0.0/24'):
         """Discover cameras on the network

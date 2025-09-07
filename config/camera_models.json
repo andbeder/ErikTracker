@@ -1,0 +1,144 @@
+{
+  "camera_models": {
+    "reolink_rlc_520a": {
+      "name": "Reolink RLC-520A",
+      "sensor_size": "1/2.8 inch",
+      "sensor_width_mm": 5.57,
+      "sensor_height_mm": 3.13,
+      "resolutions": {
+        "16:9": {
+          "width": 2560,
+          "height": 1440
+        },
+        "4:3": {
+          "width": 2560,
+          "height": 1920
+        }
+      },
+      "lens_options": [
+        {
+          "focal_length_mm": 2.8,
+          "horizontal_fov": 101,
+          "vertical_fov": 55,
+          "diagonal_fov": 115
+        },
+        {
+          "focal_length_mm": 4.0,
+          "horizontal_fov": 80,
+          "vertical_fov": 44,
+          "diagonal_fov": 91
+        }
+      ]
+    },
+    "generic_security_camera": {
+      "name": "Generic Security Camera",
+      "sensor_size": "1/3 inch",
+      "sensor_width_mm": 4.8,
+      "sensor_height_mm": 3.6,
+      "resolutions": {
+        "16:9": {
+          "width": 1920,
+          "height": 1080
+        },
+        "4:3": {
+          "width": 1600,
+          "height": 1200
+        }
+      },
+      "lens_options": [
+        {
+          "focal_length_mm": 2.8,
+          "horizontal_fov": 90,
+          "vertical_fov": 50,
+          "diagonal_fov": 103
+        },
+        {
+          "focal_length_mm": 3.6,
+          "horizontal_fov": 75,
+          "vertical_fov": 42,
+          "diagonal_fov": 86
+        },
+        {
+          "focal_length_mm": 6.0,
+          "horizontal_fov": 50,
+          "vertical_fov": 28,
+          "diagonal_fov": 57
+        },
+        {
+          "focal_length_mm": 8.0,
+          "horizontal_fov": 38,
+          "vertical_fov": 21,
+          "diagonal_fov": 43
+        }
+      ]
+    },
+    "hikvision_ds_2cd2": {
+      "name": "Hikvision DS-2CD2xxx Series",
+      "sensor_size": "1/2.8 inch",
+      "sensor_width_mm": 5.57,
+      "sensor_height_mm": 3.13,
+      "resolutions": {
+        "16:9": {
+          "width": 3840,
+          "height": 2160
+        },
+        "4:3": {
+          "width": 2688,
+          "height": 2016
+        }
+      },
+      "lens_options": [
+        {
+          "focal_length_mm": 2.8,
+          "horizontal_fov": 102,
+          "vertical_fov": 54,
+          "diagonal_fov": 116
+        },
+        {
+          "focal_length_mm": 4.0,
+          "horizontal_fov": 79,
+          "vertical_fov": 43,
+          "diagonal_fov": 90
+        },
+        {
+          "focal_length_mm": 6.0,
+          "horizontal_fov": 54,
+          "vertical_fov": 30,
+          "diagonal_fov": 62
+        }
+      ]
+    },
+    "dahua_ipc_hdw": {
+      "name": "Dahua IPC-HDW Series",
+      "sensor_size": "1/2.7 inch",
+      "sensor_width_mm": 5.7,
+      "sensor_height_mm": 4.28,
+      "resolutions": {
+        "16:9": {
+          "width": 2560,
+          "height": 1440
+        },
+        "4:3": {
+          "width": 2048,
+          "height": 1536
+        }
+      },
+      "lens_options": [
+        {
+          "focal_length_mm": 2.8,
+          "horizontal_fov": 106,
+          "vertical_fov": 57,
+          "diagonal_fov": 120
+        },
+        {
+          "focal_length_mm": 3.6,
+          "horizontal_fov": 87,
+          "vertical_fov": 47,
+          "diagonal_fov": 99
+        }
+      ]
+    }
+  },
+  "default_camera": "reolink_rlc_520a",
+  "default_lens_index": 1
+}

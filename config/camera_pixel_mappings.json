@@ -1,0 +1,150 @@
+{
+  "backyard": {
+    "camera_name": "backyard",
+    "timestamp": "2025-09-06T20:35:43.446049",
+    "yard_map_bounds": {
+      "x_min": -5.0,
+      "x_max": 5.0,
+      "y_min": -5.0,
+      "y_max": 5.0
+    },
+    "camera_pose": {
+      "position": [
+        0.007939650514749319,
+        3.0295321273261138,
+        2.612334570072479
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "transformation_matrix": [
+        [
+          -0.9999922225321327,
+          0.0,
+          -0.003943966942752027,
+          0.018242549952146747
+        ],
+        [
+          -0.0025353356084608556,
+          -0.7660013520062464,
+          0.642833960520098,
+          0.6413484572735728
+        ],
+        [
+          0.0030210840104159947,
+          -0.6428389601794546,
+          -0.7659953944553449,
+          3.9485135456613545
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    },
+    "mapping_table": {
+      "type": "simplified",
+      "description": "Camera to yard map pixel projection mapping",
+      "camera_resolution": [
+        1920,
+        1080
+      ],
+      "map_resolution": [
+        1280,
+        720
+      ],
+      "map_bounds": {
+        "x_min": -5.0,
+        "x_max": 5.0,
+        "y_min": -5.0,
+        "y_max": 5.0
+      },
+      "notes": "This is a placeholder for the actual pixel mapping implementation"
+    },
+    "status": "mapped"
+  },
+  "side_yard": {
+    "camera_name": "side_yard",
+    "timestamp": "2025-09-06T20:36:32.865166",
+    "yard_map_bounds": {
+      "center_x": -0.75,
+      "center_y": -0.48,
+      "projection": "xz",
+      "rotation_degrees": 57,
+      "scale_meters_per_pixel": 0.0114,
+      "x_max": 6.546,
+      "x_min": -8.046,
+      "y_max": 3.624,
+      "y_min": -4.584
+    },
+    "camera_pose": {
+      "position": [
+        -2.1155681685499874,
+        2.886808517610847,
+        0.17292246740879386
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "transformation_matrix": [
+        [
+          0.055021715610151053,
+          0.0,
+          -0.9984851580325647,
+          0.28906270732189604
+        ],
+        [
+          -0.8222638064145125,
+          -0.5672998726845159,
+          -0.045311004323996235,
+          -0.09403373982760613
+        ],
+        [
+          0.5664405030292526,
+          -0.8235112958861779,
+          0.031213812260522333,
+          3.57026535146577
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    },
+    "mapping_table": {
+      "type": "simplified",
+      "description": "Camera to yard map pixel projection mapping",
+      "camera_resolution": [
+        1920,
+        1080
+      ],
+      "map_resolution": [
+        1280,
+        720
+      ],
+      "map_bounds": {
+        "center_x": -0.75,
+        "center_y": -0.48,
+        "projection": "xz",
+        "rotation_degrees": 57,
+        "scale_meters_per_pixel": 0.0114,
+        "x_max": 6.546,
+        "x_min": -8.046,
+        "y_max": 3.624,
+        "y_min": -4.584
+      },
+      "notes": "This is a placeholder for the actual pixel mapping implementation"
+    },
+    "status": "mapped"
+  }
+}

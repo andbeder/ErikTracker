@@ -26,9 +26,7 @@ COPY templates/ ./templates/
 COPY yard_map/ ./yard_map/
 # Copy main application files
 COPY image_manager.py .
-COPY image_manager_legacy.py .
 COPY hybrid_erik_tracker.py .
-COPY custom_fusion_template.py .
 
 # Create directories
 RUN mkdir -p /app/erik_images /app/uploads /app/meshes

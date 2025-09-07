@@ -257,15 +257,18 @@ def get_active_map_image():
     try:
         yard_service = current_app.yard_service
         
+        # Get absolute path to the active yard map
+        active_map_path = os.path.abspath(yard_service.active_yard_map_path)
+        
         # Check if active map exists
-        if os.path.exists(yard_service.active_yard_map_path):
+        if os.path.exists(active_map_path):
             return send_from_directory(
-                os.path.dirname(yard_service.active_yard_map_path),
-                os.path.basename(yard_service.active_yard_map_path),
+                os.path.dirname(active_map_path),
+                os.path.basename(active_map_path),
                 mimetype='image/png'
             )
         else:
-            return jsonify({'error': 'No active yard map found'}), 404
+            return jsonify({'error': f'No active yard map found at {active_map_path}'}), 404
             
     except Exception as e:
         return jsonify({'error': str(e)}), 500

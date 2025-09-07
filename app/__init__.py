@@ -60,18 +60,22 @@ def register_blueprints(app):
     # Import and register all API blueprints
     from app.api.images import bp as images_bp
     from app.api.colmap import bp as colmap_bp
+    from app.api.orient import bp as orient_bp
     from app.api.frigate import bp as frigate_bp
     from app.api.yard_map import bp as yard_map_bp
     from app.api.cameras import bp as cameras_bp
     from app.api.erik import bp as erik_bp
     from app.api.config import bp as config_bp
     from app.api.mqtt_settings import bp as mqtt_bp
+    from app.api.pose import bp as pose_bp
     
     app.register_blueprint(images_bp)
     app.register_blueprint(colmap_bp)
+    app.register_blueprint(orient_bp)
     app.register_blueprint(frigate_bp)
     app.register_blueprint(yard_map_bp)
     app.register_blueprint(cameras_bp)
     app.register_blueprint(erik_bp)
     app.register_blueprint(config_bp)
     app.register_blueprint(mqtt_bp, url_prefix='/api/mqtt')
+    app.register_blueprint(pose_bp)

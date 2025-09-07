@@ -133,7 +133,9 @@ class Utils {
         
         function refreshImage() {
             const timestamp = Date.now();
-            img.src = `${baseUrl}?t=${timestamp}`;
+            // Check if baseUrl already has query parameters
+            const separator = baseUrl.includes('?') ? '&' : '?';
+            img.src = `${baseUrl}${separator}t=${timestamp}`;
         }
         
         // Initial load

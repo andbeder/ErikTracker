@@ -6,7 +6,10 @@ Handles RTSP streaming, camera proxies, and camera operations
 import os
 import json
 import base64
+import logging
 from flask import Blueprint, request, jsonify, current_app, Response
+
+logger = logging.getLogger(__name__)
 
 bp = Blueprint('cameras', __name__, url_prefix='/api')
 
@@ -394,16 +397,20 @@ def get_camera_latest_image(camera_name):
                                 }
                             )
         
-        # If all else fails, return a placeholder image
-        return Response(
-            generate_placeholder_image(camera_name),
-            mimetype='image/jpeg',
-            headers={
-                'Cache-Control': 'no-cache, no-store, must-revalidate',
-                'Pragma': 'no-cache',
-                'Expires': '0'
-            }
-        ), 503
+        # If all else fails, return a placeholder image with 503 status
+        placeholder_img = generate_placeholder_image(camera_name)
+        if placeholder_img:
+            return Response(
+                placeholder_img,
+                mimetype='image/jpeg',
+                headers={
+                    'Cache-Control': 'no-cache, no-store, must-revalidate',
+                    'Pragma': 'no-cache',
+                    'Expires': '0'
+                }
+            ), 503
+        else:
+            return jsonify({'error': f'Camera {camera_name} not available'}), 503
         
     except Exception as e:
         logger.error(f"Error getting camera image for {camera_name}: {e}")

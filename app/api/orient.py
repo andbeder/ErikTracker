@@ -478,24 +478,16 @@ def render_camera_pose():
         if not os.path.exists(point_cloud_path):
             return jsonify({'error': 'No point cloud available. Please run reconstruction first.'}), 400
         
-        # Generate pose visualization HTML
+        # Generate pose visualization HTML (no longer saving to disk)
         visualization_html = generate_pose_visualization(pose_data, point_cloud_path)
         
-        # Save the visualization HTML to a temporary file
-        viz_dir = '/tmp/pose_visualizations'
-        os.makedirs(viz_dir, exist_ok=True)
-        viz_file = os.path.join(viz_dir, f'{camera_name}_pose_viz.html')
-        
-        with open(viz_file, 'w') as f:
-            f.write(visualization_html)
-        
-        logger.info(f"Generated pose visualization for camera {camera_name}")
+        logger.info(f"Generated pose visualization for camera {camera_name} (dynamic generation enabled)")
         
         return jsonify({
             'status': 'success',
-            'visualization_path': viz_file,
+            'visualization_url': f'/api/orient/visualization/{camera_name}',
             'camera_name': camera_name,
-            'message': 'Camera pose visualization generated'
+            'message': 'Camera pose visualization available at dynamic URL'
         })
         
     except Exception as e:
@@ -504,67 +496,57 @@ def render_camera_pose():
 
 @bp.route('/visualization/<camera_name>')
 def serve_pose_visualization(camera_name):
-    """Serve camera pose visualization HTML file, generating on-demand if needed"""
+    """Serve camera pose visualization HTML content dynamically (no caching to disk)"""
     try:
-        viz_dir = '/tmp/pose_visualizations'
-        viz_file = os.path.join(viz_dir, f'{camera_name}_pose_viz.html')
+        from flask import Response
         
-        logger.info(f"Serving visualization for camera: {camera_name}")
-        logger.info(f"Looking for file: {viz_file}")
+        logger.info(f"Generating dynamic visualization for camera: {camera_name}")
         
-        if not os.path.exists(viz_file):
-            logger.info(f"Visualization file not found, generating on-demand for camera: {camera_name}")
-            
-            # Generate visualization on-demand
-            try:
-                # Create basic pose data for the camera in expected format
-                pose_data = {
-                    'camera_name': camera_name,
-                    'translation': [0.0, 0.0, 0.0],  # Default position
-                    'transformation_matrix': [
-                        [1.0, 0.0, 0.0, 0.0],  # Identity matrix
-                        [0.0, 1.0, 0.0, 0.0],
-                        [0.0, 0.0, 1.0, 0.0],
-                        [0.0, 0.0, 0.0, 1.0]
-                    ],
-                    'intrinsics': {
-                        'fx': 800, 'fy': 800, 'cx': 400, 'cy': 300,
-                        'width': 800, 'height': 600
-                    }
-                }
-                
-                # Use default point cloud path if available
-                point_cloud_path = '/home/andrew/nvr/meshes/yard_reconstruction.ply'
-                if not os.path.exists(point_cloud_path):
-                    # Try alternative locations
-                    alt_paths = [
-                        '/home/andrew/nvr/colmap_projects/byo_model/dense/fusion.ply',
-                        '/home/andrew/colmap/projects/yard/dense/0/fused.ply',
-                        '/home/andrew/nvr/colmap_projects/current_reconstruction/dense/0/fused.ply'
-                    ]
-                    for alt_path in alt_paths:
-                        if os.path.exists(alt_path):
-                            point_cloud_path = alt_path
-                            break
-                    else:
-                        point_cloud_path = None
-                
-                # Generate the visualization HTML
-                visualization_html = generate_pose_visualization(pose_data, point_cloud_path)
-                
-                # Save the visualization
-                os.makedirs(viz_dir, exist_ok=True)
-                with open(viz_file, 'w') as f:
-                    f.write(visualization_html)
-                
-                logger.info(f"Generated on-demand visualization for camera {camera_name}")
-                
-            except Exception as gen_error:
-                logger.error(f"Failed to generate visualization for {camera_name}: {gen_error}")
-                return jsonify({'error': f'Failed to generate visualization for camera {camera_name}: {str(gen_error)}'}), 500
+        # Load existing camera pose data or generate default
+        pose_data_dir = '/home/andrew/nvr/config/camera_poses'
+        pose_file = os.path.join(pose_data_dir, f'{camera_name}_pose.json')
         
-        logger.info(f"Serving visualization file: {viz_file}")
-        return send_file(viz_file, mimetype='text/html', as_attachment=False)
+        if os.path.exists(pose_file):
+            # Load existing camera pose data
+            with open(pose_file, 'r') as f:
+                pose_data = json.load(f)
+            logger.info(f"Loaded existing pose data for camera {camera_name}")
+        else:
+            # Generate default pose data for manual positioning
+            pose_data = generate_default_camera_pose(camera_name)
+            logger.info(f"Generated default pose data for camera {camera_name}")
+        
+        # Use default point cloud path if available
+        point_cloud_path = '/home/andrew/nvr/meshes/yard_reconstruction.ply'
+        if not os.path.exists(point_cloud_path):
+            # Try alternative locations
+            alt_paths = [
+                '/home/andrew/nvr/colmap_projects/byo_model/dense/fusion.ply',
+                '/home/andrew/colmap/projects/yard/dense/0/fused.ply',
+                '/home/andrew/nvr/colmap_projects/current_reconstruction/dense/0/fused.ply'
+            ]
+            for alt_path in alt_paths:
+                if os.path.exists(alt_path):
+                    point_cloud_path = alt_path
+                    break
+            else:
+                point_cloud_path = None
+        
+        # Generate the visualization HTML dynamically
+        visualization_html = generate_pose_visualization(pose_data, point_cloud_path)
+        
+        logger.info(f"Generated dynamic visualization for camera {camera_name}")
+        
+        # Return HTML directly without caching to disk
+        return Response(
+            visualization_html, 
+            mimetype='text/html',
+            headers={
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache',
+                'Expires': '0'
+            }
+        )
         
     except Exception as e:
         logger.error(f"Error serving visualization: {str(e)}")
@@ -577,18 +559,64 @@ def extract_camera_intrinsics(byo_model_dir):
         if not os.path.exists(cameras_path):
             return None
             
-        # Simple parsing of COLMAP cameras.bin (binary format)
-        # For now, return default parameters
-        # TODO: Implement proper binary parsing
+        # Using realistic security camera parameters (Reolink RLC-520A style)
+        # 4mm lens on 1/2.8" sensor with 80° horizontal FOV
+        # Resolution: 2560x1440 (16:9) or 2560x1920 (4:3)
+        width = 2560
+        height = 1440  # 16:9 mode
+        
+        # Calculate focal length in pixels from FOV
+        # FOV = 2 * arctan(sensor_width / (2 * focal_length))
+        # focal_length = sensor_width / (2 * tan(FOV/2))
+        hfov_rad = math.radians(80.0)  # 80 degrees horizontal FOV
+        focal_length_pixels = width / (2 * math.tan(hfov_rad / 2))
+        
         return {
-            'focal_length': 800.0,  # pixels
-            'principal_point': [640.0, 360.0],  # pixels
-            'width': 1280,
-            'height': 720,
-            'fov': 60.0  # degrees (calculated from focal length)
+            'focal_length': focal_length_pixels,  # ~1746 pixels for 80° FOV
+            'focal_length_mm': 4.0,  # Physical focal length in mm
+            'principal_point': [width/2, height/2],  # Center of image
+            'width': width,
+            'height': height,
+            'fov': 80.0,  # Horizontal FOV in degrees
+            'sensor_size': "1/2.8 inch",  # Common security camera sensor
+            'lens_type': 'wide-angle'
         }
     except Exception as e:
         logger.warning(f"Could not extract camera intrinsics: {e}")
+        return None
+
+def get_camera_config(camera_model='reolink_rlc_520a', lens_index=1):
+    """Get camera configuration from camera_models.json"""
+    try:
+        config_path = '/home/andrew/nvr/config/camera_models.json'
+        if os.path.exists(config_path):
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+                
+            if camera_model in config['camera_models']:
+                camera = config['camera_models'][camera_model]
+                if lens_index < len(camera['lens_options']):
+                    return {
+                        'model': camera['name'],
+                        'sensor_size': camera['sensor_size'],
+                        'lens': camera['lens_options'][lens_index],
+                        'resolution': camera['resolutions']['16:9']
+                    }
+        
+        # Return default if not found
+        return {
+            'model': 'Reolink RLC-520A',
+            'sensor_size': '1/2.8 inch',
+            'lens': {
+                'focal_length_mm': 4.0,
+                'horizontal_fov': 80,
+                'vertical_fov': 44,
+                'diagonal_fov': 91
+            },
+            'resolution': {'width': 2560, 'height': 1440}
+        }
+    except Exception as e:
+        logger.warning(f"Could not load camera config: {e}")
         return None
 
 def generate_default_camera_pose(camera_name):
@@ -662,6 +690,9 @@ def generate_default_camera_pose(camera_name):
     transformation_matrix[1][3] = t_y 
     transformation_matrix[2][3] = t_z
     
+    # Get camera configuration
+    camera_config = get_camera_config('reolink_rlc_520a', 1)  # 4mm lens
+    
     # Create default pose data structure
     pose_data = {
         'camera_name': camera_name,
@@ -673,7 +704,8 @@ def generate_default_camera_pose(camera_name):
         'total_features': 0,
         'calibrated_at': datetime.now().isoformat(),
         'calibration_status': 'default_manual',  # Indicates this is for manual positioning
-        'byo_model_used': False
+        'byo_model_used': False,
+        'camera_config': camera_config  # Include camera specifications
     }
     
     logger.info(f"Generated default pose for camera {camera_name} at position [{camera_x:.2f}, {camera_y:.2f}, {camera_z:.2f}]")

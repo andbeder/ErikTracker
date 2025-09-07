@@ -18,6 +18,13 @@
     100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
 }
 
+/* Trail Fade Out Animation */
+@keyframes fadeOut {
+    0% { opacity: 0.8; transform: translate(-50%, -50%) scale(1); }
+    50% { opacity: 0.4; transform: translate(-50%, -50%) scale(0.8); }
+    100% { opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
+}
+
 /* ==========================================================================
    FRIGATE LIVE VIEW
    ========================================================================== */
@@ -75,7 +82,7 @@
     overflow: hidden;
     cursor: pointer;
     transition: transform 0.2s ease, box-shadow 0.2s ease;
-    aspect-ratio: 16/9;
+    aspect-ratio: 4/3;
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
 }
 
@@ -189,7 +196,7 @@
     }
     
     .camera-panel {
-        aspect-ratio: 16/10;
+        aspect-ratio: 4/3;
     }
 }
 
@@ -278,7 +285,7 @@
     }
     
     .camera-panel {
-        aspect-ratio: 16/9;
+        aspect-ratio: 4/3;
     }
 }
 

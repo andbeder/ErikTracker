@@ -60,7 +60,7 @@ class CameraOverlay {
      */
     async loadCameraPoses() {
         try {
-            const response = await fetch('/api/colmap/camera-poses');
+            const response = await fetch('/api/orient/camera-poses');
             const data = await response.json();
             
             if (data.success && data.poses) {
@@ -146,6 +146,10 @@ class CameraOverlay {
         // However, the 'translation' field in the JSON already contains the camera position in world coordinates
         // (it's been pre-computed from the transformation matrix)
         const translation = poseData.translation;
+        
+        // If the 3D model appears upside-down, COLMAP's world Y-axis points down
+        // For top-down 2D projection, we typically use X and Z coordinates
+        // (assuming Y is vertical in the 3D world)
         return {
             x: translation[0],
             y: translation[1], 
@@ -158,22 +162,26 @@ class CameraOverlay {
      */
     getCameraDirection(poseData) {
         // COLMAP uses a world-to-camera transformation matrix
-        // Camera looks along +Z in camera coordinates
-        // To get the viewing direction in world coordinates, we need the third row of the rotation matrix
+        // Camera looks along -Z in camera coordinates (COLMAP convention)
+        // The transformation matrix is [R|t] where R is the rotation matrix
         const matrix = poseData.transformation_matrix;
         
-        // The transformation matrix is [R|t] where R is rotation and t is translation
-        // For world-to-camera transform, the viewing direction in world space is R^T * [0,0,1]
-        // This equals the third row of R (since R^T third column = R third row)
-        const viewX = matrix[2][0]; // R[2,0]
-        const viewY = matrix[2][1]; // R[2,1] 
-        const viewZ = matrix[2][2]; // R[2,2]
+        // The camera's viewing direction in world space is the NEGATIVE third row of R
+        // This is because in COLMAP's camera coordinate system:
+        // - X points right
+        // - Y points down  
+        // - Z points away from the scene (camera looks along -Z)
+        // So the viewing direction is -R^T * [0,0,1] = -(third row of R)
+        const viewX = -matrix[2][0]; // -R[2,0]
+        const viewY = -matrix[2][1]; // -R[2,1] 
+        const viewZ = -matrix[2][2]; // -R[2,2]
         
-        // For top-down view, we project onto XY plane
-        // Calculate yaw angle (rotation around Z axis)
-        const yaw = Math.atan2(viewY, viewX);
+        // For top-down view with upside-down COLMAP model (Y points down),
+        // we project onto X-Z plane instead of X-Y plane
+        // Calculate yaw angle (rotation around Y axis for X-Z plane)
+        const yaw = Math.atan2(viewZ, viewX);
         
-        console.log(`Camera ${poseData.camera_name}: direction=(${viewX.toFixed(3)}, ${viewY.toFixed(3)}, ${viewZ.toFixed(3)}), yaw=${(yaw * 180/Math.PI).toFixed(1)}°, pos=(${poseData.translation[0].toFixed(2)}, ${poseData.translation[1].toFixed(2)})`);
+        console.log(`Camera ${poseData.camera_name}: direction=(${viewX.toFixed(3)}, ${viewY.toFixed(3)}, ${viewZ.toFixed(3)}), yaw=${(yaw * 180/Math.PI).toFixed(1)}°, pos=(${poseData.translation[0].toFixed(2)}, ${poseData.translation[2].toFixed(2)})`);
         
         return {
             x: viewX,
@@ -199,22 +207,23 @@ class CameraOverlay {
         const distance = params.view_distance;
         
         // Calculate the cone endpoints in world coordinates
+        // Since COLMAP Y points down (upside-down model), use X-Z plane for top-down view
         const leftAngle = yaw - halfFOV;
         const rightAngle = yaw + halfFOV;
         
         const leftEndX = position.x + distance * Math.cos(leftAngle);
-        const leftEndY = position.y + distance * Math.sin(leftAngle);
+        const leftEndZ = position.z + distance * Math.sin(leftAngle);
         
         const rightEndX = position.x + distance * Math.cos(rightAngle);
-        const rightEndY = position.y + distance * Math.sin(rightAngle);
+        const rightEndZ = position.z + distance * Math.sin(rightAngle);
         
         return {
-            camera: { x: position.x, y: position.y },
-            leftEnd: { x: leftEndX, y: leftEndY },
-            rightEnd: { x: rightEndX, y: rightEndY },
+            camera: { x: position.x, y: position.z },  // Use X-Z for top-down
+            leftEnd: { x: leftEndX, y: leftEndZ },     // Use X-Z for top-down
+            rightEnd: { x: rightEndX, y: rightEndZ },   // Use X-Z for top-down
             centerEnd: { 
                 x: position.x + distance * Math.cos(yaw),
-                y: position.y + distance * Math.sin(yaw)
+                y: position.z + distance * Math.sin(yaw)  // Use X-Z for top-down
             }
         };
     }

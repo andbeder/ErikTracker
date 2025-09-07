@@ -1,0 +1,47 @@
+{
+  "camera_name": "test_camera",
+  "transformation_matrix": [
+    [
+      1,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      1,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      1,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      1
+    ]
+  ],
+  "translation": [
+    0,
+    0,
+    0
+  ],
+  "rotation": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+  ],
+  "confidence": 1.0,
+  "features_matched": 0,
+  "total_features": 0,
+  "calibrated_at": "2025-09-06T17:32:02.827012",
+  "calibration_status": "manual",
+  "byo_model_used": false,
+  "manually_positioned": true
+}
