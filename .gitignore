@@ -56,11 +56,23 @@ env/
 ehthumbs.db
 Thumbs.db
 
-# Logs
+# Logs and log directories
 *.log
+logs/
+log/
 frigate-logs.txt
 frigate_logs.txt
 image_manager_debug.log
+
+# Log directories from services
+frigate/logs/
+double-take/logs/
+homeassistant/logs/
+mosquitto/log/
+nginx/logs/
+
+# Temporary streaming files
+/tmp/hls_streams/
 
 # Temporary and cache files
 *.tmp

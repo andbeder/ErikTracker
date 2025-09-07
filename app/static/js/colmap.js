@@ -1530,14 +1530,13 @@ class ColmapManager {
                 extractBtn.textContent = '⏳ Extracting frames...';
             }
             
-            // Make API call to extract frames
-            const response = await fetch('/api/colmap/extract-frames', {
+            // Make API call to extract frames from ALL uploaded videos
+            const response = await fetch('/api/colmap/extract-frames-all', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    video_file: '/home/andrew/nvr/uploaded_videos/IMG_0656.MOV',
                     project_dir: '/home/andrew/nvr/colmap_projects/current_reconstruction',
                     fps: 1  // Extract 1 frame per second by default
                 })
@@ -1546,7 +1545,24 @@ class ColmapManager {
             const result = await response.json();
             
             if (response.ok && result.status === 'success') {
-                Utils.showToast(`✅ Extracted ${result.frames_extracted || 'multiple'} frames successfully!`, 'success');
+                const totalFrames = result.total_frames_extracted || 0;
+                const videosProcessed = result.videos_processed || 0;
+                const extractionResults = result.extraction_results || [];
+                
+                // Create detailed success message
+                let message = `✅ Extracted ${totalFrames} frames from ${videosProcessed} video(s)!`;
+                if (extractionResults.length > 0) {
+                    const videoDetails = extractionResults
+                        .filter(r => r.status === 'success')
+                        .map(r => `${r.video}: ${r.frames_extracted} frames`)
+                        .join(', ');
+                    if (videoDetails) {
+                        message += `\n${videoDetails}`;
+                    }
+                }
+                
+                Utils.showToast(message, 'success');
+                console.log('Frame extraction results:', extractionResults);
                 
                 // Update workflow status
                 const frameStatus = document.getElementById('frameStatus');
@@ -1562,7 +1578,7 @@ class ColmapManager {
                 
                 // Update button to show frame count
                 if (extractBtn) {
-                    extractBtn.textContent = `📹 ${result.frames_extracted || 'Multiple'} Frames Ready`;
+                    extractBtn.textContent = `📹 ${totalFrames} Frames Ready (${videosProcessed} videos)`;
                 }
             } else {
                 throw new Error(result.error || 'Frame extraction failed');

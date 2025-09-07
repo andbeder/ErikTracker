@@ -1,0 +1,20 @@
+{
+  "camera_name": "backyard",
+  "yard_map_config": {
+    "image_width": 1280,
+    "image_height": 720,
+    "center_x": -0.75,
+    "center_y": -0.48,
+    "projection": "xz",
+    "rotation_degrees": 57,
+    "scale_meters_per_pixel": 0.0114
+  },
+  "camera_resolution": {
+    "width": 1920,
+    "height": 1080
+  },
+  "sample_rate": 20,
+  "camera_to_yard_mapping": {},
+  "valid_pixel_count": 0,
+  "total_sampled_pixels": 5184
+}

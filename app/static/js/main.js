@@ -1331,3 +1331,41 @@ async function checkCameraPoseAvailability() {
         console.error('Error checking camera pose availability:', error);
     }
 }
+
+// Camera management functions
+window.editCamera = function(cameraName) {
+    console.log('Edit camera:', cameraName);
+    // Open the dedicated camera edit modal
+    if (window.openCameraEdit) {
+        window.openCameraEdit(cameraName);
+    } else {
+        alert(`Camera edit functionality not yet loaded for ${cameraName}.\n\nPlease refresh the page and try again.`);
+    }
+};
+
+window.removeCamera = async function(cameraName) {
+    console.log('Remove camera:', cameraName);
+    
+    if (!confirm(`Are you sure you want to remove camera "${cameraName}"?\n\nThis will:\n- Remove camera from Frigate configuration\n- Delete all associated recordings\n- Remove detection settings\n\nThis action cannot be undone.`)) {
+        return;
+    }
+    
+    try {
+        // Use the config service to remove the camera
+        if (window.configManager) {
+            const result = await window.configManager.removeCamera(cameraName);
+            if (result.success) {
+                alert(`Camera "${cameraName}" removed successfully`);
+                // Refresh the page to update the camera list
+                window.location.reload();
+            } else {
+                throw new Error(result.error || 'Unknown error');
+            }
+        } else {
+            throw new Error('Configuration manager not available');
+        }
+    } catch (error) {
+        console.error('Error removing camera:', error);
+        alert(`Failed to remove camera "${cameraName}": ${error.message}`);
+    }
+};

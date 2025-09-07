@@ -1,25 +1,19 @@
 {
   "backyard": {
     "camera_name": "backyard",
-    "timestamp": "2025-09-06T20:35:43.446049",
+    "timestamp": "2025-09-07T04:42:46.540875",
+    "status": "mapped",
     "yard_map_bounds": {
-      "x_min": -5.0,
-      "x_max": 5.0,
-      "y_min": -5.0,
-      "y_max": 5.0
+      "image_width": 1280,
+      "image_height": 720,
+      "center_x": -0.75,
+      "center_y": -0.48,
+      "projection": "xz",
+      "rotation_degrees": 57,
+      "scale_meters_per_pixel": 0.0114
     },
     "camera_pose": {
-      "position": [
-        0.007939650514749319,
-        3.0295321273261138,
-        2.612334570072479
-      ],
-      "rotation": [
-        0.0,
-        0.0,
-        0.0,
-        1.0
-      ],
+      "camera_name": "backyard",
       "transformation_matrix": [
         [
           -0.9999922225321327,
@@ -45,32 +39,35 @@
           0.0,
           1.0
         ]
-      ]
+      ],
+      "translation": [
+        0.007939650514749319,
+        3.0295321273261138,
+        2.612334570072479
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "confidence": 0.856,
+      "features_matched": 428,
+      "total_features": 1014,
+      "calibrated_at": "2025-09-05T18:48:49.336856",
+      "calibration_status": "calibrated",
+      "byo_model_used": true
     },
     "mapping_table": {
-      "type": "simplified",
-      "description": "Camera to yard map pixel projection mapping",
-      "camera_resolution": [
-        1920,
-        1080
-      ],
-      "map_resolution": [
-        1280,
-        720
-      ],
-      "map_bounds": {
-        "x_min": -5.0,
-        "x_max": 5.0,
-        "y_min": -5.0,
-        "y_max": 5.0
-      },
-      "notes": "This is a placeholder for the actual pixel mapping implementation"
-    },
-    "status": "mapped"
+      "type": "ray_cast",
+      "sample_rate": 20,
+      "valid_pixels": 0,
+      "total_sampled": 5184
+    }
   },
   "side_yard": {
     "camera_name": "side_yard",
-    "timestamp": "2025-09-06T20:36:32.865166",
+    "timestamp": "2025-09-07T04:45:26.286348",
     "yard_map_bounds": {
       "center_x": -0.75,
       "center_y": -0.48,

@@ -180,53 +180,176 @@ def list_frames():
 
 @bp.route('/extract-frames', methods=['POST'])
 def extract_frames():
-    """Extract frames from video for COLMAP"""
+    """Extract frames from video(s) for COLMAP"""
     try:
         data = request.json
-        video_file = data.get('video_file')
+        video_files = data.get('video_files')  # Now expects a list
         project_dir = data.get('project_dir')
         fps = float(data.get('fps', 1))  # Convert to float to handle both int and decimal values
         
-        if not video_file or not project_dir:
-            return jsonify({'error': 'Missing required parameters'}), 400
+        # Handle backward compatibility - if single video_file provided, convert to list
+        if not video_files:
+            video_file = data.get('video_file')
+            if video_file:
+                video_files = [video_file]
+            else:
+                return jsonify({'error': 'No video files specified'}), 400
+        
+        if not project_dir:
+            return jsonify({'error': 'Project directory not specified'}), 400
         
         # Create project structure
         os.makedirs(project_dir, exist_ok=True)
         images_dir = os.path.join(project_dir, 'images')
         os.makedirs(images_dir, exist_ok=True)
         
-        # Extract frames using ffmpeg
-        # If fps is <= 1, treat as fps rate (e.g., 0.5 = every 2 seconds)
-        # If fps is > 1, treat as frame interval (e.g., 20 = every 20th frame)
-        if fps <= 1:
-            # Use fps filter for sub-1 fps rates
-            vf_filter = f'fps={fps}'
-        else:
-            # Use select filter for frame intervals (every Nth frame)
-            vf_filter = f'select=not(mod(n\\,{int(fps)}))'
+        total_frames_extracted = 0
+        extraction_results = []
         
-        cmd = [
-            'ffmpeg', '-i', video_file,
-            '-vf', vf_filter,
-            '-vsync', 'vfr',  # Variable frame rate to work with select filter
-            '-q:v', '2',
-            os.path.join(images_dir, 'frame_%04d.jpg')
-        ]
+        # Process each video file
+        for video_file in video_files:
+            try:
+                # Get video filename without extension for prefix
+                video_basename = os.path.basename(video_file)
+                video_name = os.path.splitext(video_basename)[0]
+                
+                logger.info(f"Extracting frames from {video_basename} with prefix '{video_name}_'")
+                
+                # Extract frames using ffmpeg with video name prefix
+                # If fps is <= 1, treat as fps rate (e.g., 0.5 = every 2 seconds)
+                # If fps is > 1, treat as frame interval (e.g., 20 = every 20th frame)
+                if fps <= 1:
+                    # Use fps filter for sub-1 fps rates
+                    vf_filter = f'fps={fps}'
+                else:
+                    # Use select filter for frame intervals (every Nth frame)
+                    vf_filter = f'select=not(mod(n\\,{int(fps)}))'
+                
+                # Create output pattern with video name prefix
+                output_pattern = os.path.join(images_dir, f'{video_name}_frame_%04d.jpg')
+                
+                cmd = [
+                    'ffmpeg', '-i', video_file,
+                    '-vf', vf_filter,
+                    '-vsync', 'vfr',  # Variable frame rate to work with select filter
+                    '-q:v', '2',
+                    output_pattern
+                ]
+                
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)  # 30 minutes for large videos
+                
+                if result.returncode == 0:
+                    # Count extracted frames for this video
+                    video_frames = len([f for f in os.listdir(images_dir) if f.startswith(f'{video_name}_frame_') and f.endswith('.jpg')])
+                    total_frames_extracted += video_frames
+                    
+                    extraction_results.append({
+                        'video': video_basename,
+                        'frames_extracted': video_frames,
+                        'status': 'success'
+                    })
+                    
+                    logger.info(f"Successfully extracted {video_frames} frames from {video_basename}")
+                else:
+                    logger.error(f"Frame extraction failed for {video_basename}: {result.stderr}")
+                    extraction_results.append({
+                        'video': video_basename,
+                        'frames_extracted': 0,
+                        'status': 'failed',
+                        'error': result.stderr
+                    })
+                    
+            except Exception as video_error:
+                logger.error(f"Error processing video {video_file}: {str(video_error)}")
+                extraction_results.append({
+                    'video': os.path.basename(video_file),
+                    'frames_extracted': 0,
+                    'status': 'error',
+                    'error': str(video_error)
+                })
         
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)  # 30 minutes for large videos
-        
-        if result.returncode == 0:
-            # Count extracted frames
-            frame_count = len([f for f in os.listdir(images_dir) if f.endswith('.jpg')])
+        # Check if any frames were extracted
+        if total_frames_extracted > 0:
             return jsonify({
                 'status': 'success',
-                'frames_extracted': frame_count,
+                'total_frames_extracted': total_frames_extracted,
+                'videos_processed': len(video_files),
+                'extraction_results': extraction_results,
                 'project_dir': project_dir
             })
         else:
-            return jsonify({'error': f'Frame extraction failed: {result.stderr}'}), 500
+            return jsonify({
+                'status': 'failed',
+                'error': 'No frames were extracted from any video',
+                'extraction_results': extraction_results
+            }), 500
             
     except Exception as e:
+        logger.error(f"Frame extraction error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@bp.route('/extract-frames-all', methods=['POST'])
+def extract_frames_all():
+    """Extract frames from all uploaded videos"""
+    try:
+        data = request.json or {}
+        project_dir = data.get('project_dir', '/home/andrew/nvr/colmap_projects/current_reconstruction')
+        fps = float(data.get('fps', 1))
+        
+        # Get list of all uploaded videos
+        file_service = current_app.file_service
+        videos = file_service.list_files('video')
+        
+        if not videos:
+            return jsonify({'error': 'No videos found to process'}), 400
+        
+        # Build full paths to video files
+        video_files = []
+        
+        for video in videos:
+            # Try different possible paths for the video
+            possible_paths = [
+                # Direct path if it's already absolute
+                video['path'],
+                # Relative to current working directory
+                os.path.join(os.getcwd(), video['path']),
+                # In upload folder
+                os.path.join(current_app.config.get('UPLOAD_FOLDER', './erik_images'), video['path']),
+                # Direct in uploaded_videos folder 
+                os.path.join('/home/andrew/nvr/uploaded_videos', os.path.basename(video['path']))
+            ]
+            
+            video_path = None
+            for path in possible_paths:
+                if os.path.exists(path):
+                    video_path = path
+                    break
+            
+            if video_path:
+                video_files.append(video_path)
+                logger.info(f"Found video at: {video_path}")
+            else:
+                logger.warning(f"Video not found at any expected location: {video['path']}")
+        
+        if not video_files:
+            return jsonify({'error': 'No accessible video files found'}), 400
+        
+        logger.info(f"Processing {len(video_files)} videos: {[os.path.basename(f) for f in video_files]}")
+        
+        # Use the existing extract_frames logic but pass all videos
+        extraction_data = {
+            'video_files': video_files,
+            'project_dir': project_dir,
+            'fps': fps
+        }
+        
+        # Call the extract_frames function directly
+        from flask import Flask
+        with current_app.test_request_context(json=extraction_data, method='POST'):
+            return extract_frames()
+        
+    except Exception as e:
+        logger.error(f"Extract all frames error: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @bp.route('/feature-extraction', methods=['POST'])
@@ -679,6 +802,66 @@ def dense_reconstruction_status():
             'status': 'Error checking status',
             'error': str(e)
         }), 500
+
+@bp.route('/reconstruction-status', methods=['GET'])
+def reconstruction_status():
+    """Get overall reconstruction status (both sparse and dense)"""
+    try:
+        project_dir = request.args.get('project_dir', '/home/andrew/nvr/colmap_projects/current_reconstruction')
+        
+        if not os.path.exists(project_dir):
+            return jsonify({
+                'reconstruction_complete': False,
+                'has_sparse': False,
+                'has_dense': False,
+                'message': 'No reconstruction project found'
+            })
+        
+        # Check for sparse reconstruction
+        sparse_dir = os.path.join(project_dir, 'sparse')
+        has_sparse = False
+        sparse_models = 0
+        
+        if os.path.exists(sparse_dir):
+            for item in os.listdir(sparse_dir):
+                model_path = os.path.join(sparse_dir, item)
+                if os.path.isdir(model_path) and os.path.exists(os.path.join(model_path, 'cameras.bin')):
+                    has_sparse = True
+                    sparse_models += 1
+        
+        # Check for dense reconstruction
+        dense_dir = os.path.join(project_dir, 'dense')
+        has_dense = False
+        point_count = 0
+        
+        if os.path.exists(dense_dir):
+            ply_file = os.path.join(dense_dir, 'fused.ply')
+            if os.path.exists(ply_file):
+                has_dense = True
+                try:
+                    with open(ply_file, 'r') as f:
+                        for line in f:
+                            if line.startswith('element vertex'):
+                                point_count = int(line.split()[-1])
+                                break
+                except:
+                    point_count = 0
+        
+        reconstruction_complete = has_sparse and has_dense
+        
+        return jsonify({
+            'reconstruction_complete': reconstruction_complete,
+            'has_sparse': has_sparse,
+            'has_dense': has_dense,
+            'sparse_models': sparse_models,
+            'point_count': point_count,
+            'project_dir': project_dir,
+            'message': 'Reconstruction status retrieved successfully'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting reconstruction status: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 @bp.route('/dense-reconstruction-progress', methods=['GET'])
 def dense_reconstruction_progress():

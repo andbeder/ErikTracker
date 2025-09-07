@@ -463,3 +463,308 @@ def generate_placeholder_image(camera_name, error=False):
         logger.error(f"Error generating placeholder image: {e}")
         # Return minimal response
         return b''
+
+@bp.route('/<camera_name>/stream.m3u8', methods=['GET'])
+def get_camera_hls_stream(camera_name):
+    """Proxy HLS stream from Frigate to avoid CORS issues"""
+    try:
+        import requests
+        
+        # Proxy request to Frigate HLS endpoint
+        frigate_url = f"http://localhost:5000/live/hls/{camera_name}/index.m3u8"
+        
+        try:
+            # Forward any query parameters
+            params = dict(request.args)
+            
+            response = requests.get(frigate_url, params=params, timeout=10)
+            if response.status_code == 200:
+                return Response(
+                    response.content,
+                    mimetype='application/x-mpegURL',
+                    headers={
+                        'Access-Control-Allow-Origin': '*',
+                        'Access-Control-Allow-Methods': 'GET, OPTIONS',
+                        'Access-Control-Allow-Headers': 'Content-Type',
+                        'Cache-Control': 'no-cache, no-store, must-revalidate',
+                        'Pragma': 'no-cache',
+                        'Expires': '0'
+                    }
+                )
+            else:
+                return jsonify({'error': f'Frigate returned {response.status_code}'}), response.status_code
+                
+        except requests.RequestException as e:
+            return jsonify({'error': f'Failed to connect to Frigate: {str(e)}'}), 503
+        
+    except Exception as e:
+        logger.error(f"Error proxying HLS stream for {camera_name}: {e}")
+        return jsonify({'error': 'Stream proxy error'}), 500
+
+@bp.route('/<camera_name>/segments/<path:segment_path>', methods=['GET'])  
+def get_camera_hls_segment(camera_name, segment_path):
+    """Proxy HLS segments from Frigate"""
+    try:
+        import requests
+        
+        # Proxy request to Frigate HLS segment
+        frigate_url = f"http://localhost:5000/live/hls/{camera_name}/{segment_path}"
+        
+        try:
+            response = requests.get(frigate_url, timeout=10, stream=True)
+            if response.status_code == 200:
+                return Response(
+                    response.iter_content(chunk_size=8192),
+                    mimetype='video/mp2t',
+                    headers={
+                        'Access-Control-Allow-Origin': '*',
+                        'Access-Control-Allow-Methods': 'GET, OPTIONS',
+                        'Access-Control-Allow-Headers': 'Content-Type',
+                        'Cache-Control': 'no-cache'
+                    }
+                )
+            else:
+                return jsonify({'error': f'Segment not found'}), response.status_code
+                
+        except requests.RequestException as e:
+            return jsonify({'error': f'Failed to get segment: {str(e)}'}), 503
+        
+    except Exception as e:
+        logger.error(f"Error proxying HLS segment {segment_path} for {camera_name}: {e}")
+        return jsonify({'error': 'Segment proxy error'}), 500
+
+@bp.route('/<camera_name>/mjpeg', methods=['GET'])
+def get_camera_mjpeg_stream(camera_name):
+    """Provide MJPEG stream for camera"""
+    try:
+        frigate_service = current_app.frigate_service
+        
+        def generate_mjpeg():
+            import time
+            import requests
+            
+            while True:
+                try:
+                    # Get latest frame from Frigate
+                    frigate_url = f"http://localhost:5000/api/{camera_name}/latest.jpg"
+                    response = requests.get(frigate_url, timeout=5)
+                    
+                    if response.status_code == 200:
+                        yield (b'--frame\r\n'
+                               b'Content-Type: image/jpeg\r\n\r\n' + 
+                               response.content + b'\r\n')
+                    else:
+                        # If Frigate fails, try local snapshot
+                        local_url = f"http://localhost:9001/api/{camera_name}/latest.jpg"
+                        local_response = requests.get(local_url, timeout=5)
+                        if local_response.status_code == 200:
+                            yield (b'--frame\r\n'
+                                   b'Content-Type: image/jpeg\r\n\r\n' + 
+                                   local_response.content + b'\r\n')
+                    
+                    time.sleep(0.1)  # 10 FPS
+                    
+                except Exception as e:
+                    logger.warning(f"MJPEG frame error for {camera_name}: {e}")
+                    time.sleep(1)  # Wait longer on error
+        
+        return Response(
+            generate_mjpeg(),
+            mimetype='multipart/x-mixed-replace; boundary=frame',
+            headers={
+                'Access-Control-Allow-Origin': '*',
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache'
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error creating MJPEG stream for {camera_name}: {e}")
+        return jsonify({'error': 'MJPEG stream error'}), 500
+
+@bp.route('/<camera_name>/direct-stream.m3u8', methods=['GET'])
+def get_direct_rtsp_hls_stream(camera_name):
+    """Convert camera RTSP stream directly to HLS"""
+    try:
+        import subprocess
+        import threading
+        import time
+        import tempfile
+        
+        frigate_service = current_app.frigate_service
+        
+        # Get camera RTSP URL from Frigate config
+        camera_config = frigate_service.get_camera_config(camera_name)
+        if not camera_config:
+            return jsonify({'error': f'Camera {camera_name} not found'}), 404
+        
+        rtsp_url = None
+        if 'ffmpeg' in camera_config and 'inputs' in camera_config['ffmpeg']:
+            for input_stream in camera_config['ffmpeg']['inputs']:
+                if 'path' in input_stream and input_stream['path'].startswith('rtsp://'):
+                    rtsp_url = input_stream['path']
+                    break
+        
+        if not rtsp_url:
+            return jsonify({'error': f'No RTSP URL found for camera {camera_name}'}), 404
+        
+        logger.info(f"Starting direct HLS conversion for {camera_name} from {rtsp_url}")
+        
+        # Create temporary directory for HLS segments
+        hls_dir = f"/tmp/hls_streams/{camera_name}"
+        os.makedirs(hls_dir, exist_ok=True)
+        
+        playlist_path = os.path.join(hls_dir, 'playlist.m3u8')
+        
+        # Start FFmpeg process to convert RTSP to HLS
+        def start_hls_conversion():
+            try:
+                cmd = [
+                    'ffmpeg',
+                    '-i', rtsp_url,
+                    '-c:v', 'libx264',           # Video codec
+                    '-preset', 'ultrafast',      # Fast encoding
+                    '-tune', 'zerolatency',      # Low latency
+                    '-g', '30',                  # GOP size
+                    '-sc_threshold', '0',        # Disable scene detection
+                    '-f', 'hls',                 # HLS format
+                    '-hls_time', '2',            # 2 second segments
+                    '-hls_list_size', '5',       # Keep 5 segments
+                    '-hls_flags', 'delete_segments+append_list', # Clean up old segments
+                    '-hls_segment_filename', os.path.join(hls_dir, 'segment_%03d.ts'),
+                    playlist_path,
+                    '-y'  # Overwrite output
+                ]
+                
+                logger.info(f"Starting FFmpeg command for {camera_name}")
+                process = subprocess.Popen(
+                    cmd, 
+                    stdout=subprocess.PIPE, 
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+                
+                # Store process for cleanup
+                if not hasattr(current_app, 'hls_processes'):
+                    current_app.hls_processes = {}
+                current_app.hls_processes[camera_name] = process
+                
+                # Monitor process
+                for i in range(30):  # Wait up to 30 seconds for playlist
+                    if os.path.exists(playlist_path):
+                        logger.info(f"HLS playlist created for {camera_name}")
+                        break
+                    time.sleep(1)
+                else:
+                    logger.warning(f"HLS playlist not created within timeout for {camera_name}")
+                
+            except Exception as e:
+                logger.error(f"FFmpeg conversion error for {camera_name}: {e}")
+        
+        # Start conversion in background thread
+        if not os.path.exists(playlist_path):
+            conversion_thread = threading.Thread(target=start_hls_conversion, daemon=True)
+            conversion_thread.start()
+            
+            # Wait briefly for playlist to be created
+            for i in range(10):
+                if os.path.exists(playlist_path):
+                    break
+                time.sleep(0.5)
+        
+        # If playlist exists, serve it with corrected URLs
+        if os.path.exists(playlist_path):
+            with open(playlist_path, 'r') as f:
+                playlist_content = f.read()
+            
+            # Replace segment references with proper URLs
+            lines = playlist_content.split('\n')
+            corrected_lines = []
+            for line in lines:
+                if line.endswith('.ts'):
+                    # Convert segment filename to full URL
+                    corrected_lines.append(f'/api/{camera_name}/hls-segments/{line}')
+                else:
+                    corrected_lines.append(line)
+            
+            corrected_playlist = '\n'.join(corrected_lines)
+            
+            return Response(
+                corrected_playlist,
+                mimetype='application/x-mpegURL',
+                headers={
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+                    'Access-Control-Allow-Headers': 'Content-Type',
+                    'Cache-Control': 'no-cache, no-store, must-revalidate',
+                    'Pragma': 'no-cache'
+                }
+            )
+        else:
+            return jsonify({'error': 'HLS conversion still starting, please try again in a few seconds'}), 202
+        
+    except Exception as e:
+        logger.error(f"Error creating direct HLS stream for {camera_name}: {e}")
+        return jsonify({'error': f'Direct stream error: {str(e)}'}), 500
+
+@bp.route('/<camera_name>/hls-segments/<path:segment_name>', methods=['GET'])
+def get_hls_segment(camera_name, segment_name):
+    """Serve HLS segments for direct RTSP conversion"""
+    try:
+        hls_dir = f"/tmp/hls_streams/{camera_name}"
+        segment_path = os.path.join(hls_dir, segment_name)
+        
+        if not os.path.exists(segment_path):
+            return jsonify({'error': 'Segment not found'}), 404
+        
+        with open(segment_path, 'rb') as f:
+            segment_data = f.read()
+        
+        return Response(
+            segment_data,
+            mimetype='video/mp2t',
+            headers={
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET, OPTIONS',
+                'Cache-Control': 'max-age=10'
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error serving HLS segment {segment_name} for {camera_name}: {e}")
+        return jsonify({'error': 'Segment error'}), 500
+
+@bp.route('/<camera_name>/rtsp-info', methods=['GET'])
+def get_camera_rtsp_info(camera_name):
+    """Get RTSP URL and info for direct camera connection"""
+    try:
+        frigate_service = current_app.frigate_service
+        
+        # Get camera RTSP URL from Frigate config
+        camera_config = frigate_service.get_camera_config(camera_name)
+        if not camera_config:
+            return jsonify({'error': f'Camera {camera_name} not found'}), 404
+        
+        rtsp_streams = []
+        if 'ffmpeg' in camera_config and 'inputs' in camera_config['ffmpeg']:
+            for i, input_stream in enumerate(camera_config['ffmpeg']['inputs']):
+                if 'path' in input_stream and input_stream['path'].startswith('rtsp://'):
+                    rtsp_streams.append({
+                        'stream_id': i,
+                        'rtsp_url': input_stream['path'],
+                        'roles': input_stream.get('roles', [])
+                    })
+        
+        if not rtsp_streams:
+            return jsonify({'error': f'No RTSP URLs found for camera {camera_name}'}), 404
+        
+        return jsonify({
+            'camera_name': camera_name,
+            'rtsp_streams': rtsp_streams,
+            'hls_endpoint': f'/api/{camera_name}/direct-stream.m3u8',
+            'mjpeg_endpoint': f'/api/{camera_name}/mjpeg'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting RTSP info for {camera_name}: {e}")
+        return jsonify({'error': f'RTSP info error: {str(e)}'}), 500

@@ -5,13 +5,18 @@ Handles camera-to-yard-map pixel projection mappings
 
 import os
 import json
-import numpy as np
-from flask import Blueprint, request, jsonify, current_app
+from datetime import datetime
+from flask import Blueprint, request, jsonify, current_app, send_file
 import logging
+import numpy as np
+from app.services.pixel_mapping_service import PixelMappingService
 
 logger = logging.getLogger(__name__)
 
 bp = Blueprint('pose', __name__, url_prefix='/api/pose')
+
+# Initialize pixel mapping service
+pixel_service = PixelMappingService()
 
 # Storage for camera pixel mappings
 CAMERA_MAPPINGS_FILE = 'config/camera_pixel_mappings.json'
@@ -301,4 +306,265 @@ def project_to_map():
         
     except Exception as e:
         logger.error(f"Error projecting to map: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# New ray-casting pixel mapping endpoints
+
+@bp.route('/build-ground-height-map', methods=['POST'])
+def build_ground_height_map():
+    """Build ground height map from point cloud"""
+    try:
+        data = request.json
+        point_cloud_path = data.get('point_cloud_path')
+        percentile = data.get('percentile', 20)
+        
+        # Load yard map configuration
+        yard_config_path = data.get('yard_config_path', 'config/yard_map_config.json')
+        pixel_service.load_yard_map_config(yard_config_path)
+        
+        # Check if point cloud exists
+        mesh_folder = os.environ.get('MESH_FOLDER', '/home/andrew/nvr/meshes')
+        if not point_cloud_path:
+            # Try to find the default reconstruction
+            point_cloud_path = os.path.join(mesh_folder, 'yard_reconstruction.ply')
+        
+        if not os.path.exists(point_cloud_path):
+            return jsonify({'error': f'Point cloud not found: {point_cloud_path}'}), 404
+        
+        # Build ground height map
+        ground_heights = pixel_service.build_ground_height_map(point_cloud_path, percentile)
+        
+        # Save ground heights to file
+        output_path = os.path.join('config', 'ground_heights.json')
+        os.makedirs('config', exist_ok=True)
+        
+        # Convert tuple keys to strings for JSON serialization
+        json_heights = {f"{k[0]},{k[1]}": v for k, v in ground_heights.items()}
+        
+        with open(output_path, 'w') as f:
+            json.dump(json_heights, f)
+        
+        return jsonify({
+            'success': True,
+            'pixel_count': len(ground_heights),
+            'output_path': output_path,
+            'yard_map_config': pixel_service.yard_map_config
+        })
+        
+    except Exception as e:
+        logger.error(f"Error building ground height map: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/generate-pixel-mapping', methods=['POST'])
+def generate_pixel_mapping_raycast():
+    """Generate pixel mapping for a camera using ray-casting"""
+    try:
+        data = request.json
+        camera_name = data.get('camera_name')
+        sample_rate = data.get('sample_rate', 10)
+        
+        if not camera_name:
+            return jsonify({'error': 'Camera name required'}), 400
+        
+        # Load camera pose
+        camera_poses = load_camera_poses_from_files()
+        if camera_name not in camera_poses:
+            return jsonify({'error': f'No pose data for camera {camera_name}'}), 404
+        
+        camera_pose_data = camera_poses[camera_name]
+        
+        # Prepare camera configuration
+        camera_config = {
+            'transformation_matrix': camera_pose_data.get('transformation_matrix'),
+            'image_width': data.get('image_width', 1920),
+            'image_height': data.get('image_height', 1080),
+            'focal_length': data.get('focal_length', 1000),
+            'principal_point': data.get('principal_point', [960, 540])
+        }
+        
+        # Load ground heights if not already loaded
+        if not pixel_service.ground_heights:
+            ground_heights_path = 'config/ground_heights.json'
+            if os.path.exists(ground_heights_path):
+                with open(ground_heights_path, 'r') as f:
+                    json_heights = json.load(f)
+                    # Convert string keys back to tuples
+                    pixel_service.ground_heights = {
+                        tuple(map(int, k.split(','))): v 
+                        for k, v in json_heights.items()
+                    }
+            else:
+                return jsonify({'error': 'Ground height map not built. Run build-ground-height-map first'}), 400
+        
+        # Load yard map config if not loaded
+        if not pixel_service.yard_map_config:
+            pixel_service.load_yard_map_config()
+        
+        # Generate pixel mapping
+        mapping_result = pixel_service.generate_pixel_mapping(
+            camera_name, 
+            camera_config,
+            sample_rate
+        )
+        
+        # Save the mapping
+        pixel_service.save_mapping(camera_name)
+        
+        # Also update the legacy mappings file for compatibility
+        mappings = load_camera_mappings()
+        mappings[camera_name] = {
+            'camera_name': camera_name,
+            'timestamp': datetime.now().isoformat(),
+            'status': 'mapped',
+            'yard_map_bounds': pixel_service.yard_map_config,
+            'camera_pose': camera_pose_data,
+            'mapping_table': {
+                'type': 'ray_cast',
+                'sample_rate': sample_rate,
+                'valid_pixels': mapping_result['valid_pixel_count'],
+                'total_sampled': mapping_result['total_sampled_pixels']
+            }
+        }
+        save_camera_mappings(mappings)
+        
+        return jsonify({
+            'success': True,
+            'camera_name': camera_name,
+            'valid_mappings': mapping_result['valid_pixel_count'],
+            'total_sampled': mapping_result['total_sampled_pixels'],
+            'sample_rate': sample_rate,
+            'coverage_percentage': (mapping_result['valid_pixel_count'] / 
+                                   mapping_result['total_sampled_pixels'] * 100)
+                                  if mapping_result['total_sampled_pixels'] > 0 else 0
+        })
+        
+    except Exception as e:
+        logger.error(f"Error generating pixel mapping: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/query-pixel-mapping', methods=['POST'])
+def query_pixel_mapping():
+    """Query yard map coordinates for a camera pixel"""
+    try:
+        data = request.json
+        camera_name = data.get('camera_name')
+        pixel_x = data.get('pixel_x')
+        pixel_y = data.get('pixel_y')
+        
+        if not camera_name or pixel_x is None or pixel_y is None:
+            return jsonify({'error': 'camera_name, pixel_x, and pixel_y required'}), 400
+        
+        # Try to load existing mapping
+        if camera_name not in pixel_service.pixel_mappings:
+            mapping_path = f"config/pixel_mappings/{camera_name}_mapping.json"
+            if not pixel_service.load_mapping(camera_name, mapping_path):
+                return jsonify({'error': f'No mapping found for camera {camera_name}'}), 404
+        
+        # Get interpolated yard map coordinates
+        result = pixel_service.interpolate_pixel(pixel_x, pixel_y, camera_name)
+        
+        if result:
+            return jsonify({
+                'success': True,
+                'camera_pixel': {'x': pixel_x, 'y': pixel_y},
+                'yard_map_pixel': {
+                    'x': result['yard_map_x'],
+                    'y': result['yard_map_y']
+                },
+                'confidence': result['confidence'],
+                'interpolated': result.get('interpolated', False)
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'No ground intersection found for this pixel'
+            })
+            
+    except Exception as e:
+        logger.error(f"Error querying pixel mapping: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/visualize-pixel-mapping/<camera_name>', methods=['GET'])
+def visualize_pixel_mapping(camera_name):
+    """Generate a visualization of the pixel mapping"""
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        from io import BytesIO
+        
+        # Load mapping
+        if camera_name not in pixel_service.pixel_mappings:
+            mapping_path = f"config/pixel_mappings/{camera_name}_mapping.json"
+            if not pixel_service.load_mapping(camera_name, mapping_path):
+                return jsonify({'error': f'No mapping found for camera {camera_name}'}), 404
+        
+        mapping = pixel_service.pixel_mappings[camera_name]
+        
+        # Create visualization
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+        
+        # Plot camera view with mapped pixels
+        camera_width = mapping['camera_resolution']['width']
+        camera_height = mapping['camera_resolution']['height']
+        sample_rate = mapping['sample_rate']
+        
+        # Camera view
+        ax1.set_title(f'Camera View - {camera_name}')
+        ax1.set_xlim(0, camera_width)
+        ax1.set_ylim(camera_height, 0)
+        ax1.set_xlabel('Pixel X')
+        ax1.set_ylabel('Pixel Y')
+        ax1.set_aspect('equal')
+        
+        # Yard map view
+        yard_config = mapping['yard_map_config']
+        ax2.set_title('Yard Map Coverage')
+        ax2.set_xlim(0, yard_config['image_width'])
+        ax2.set_ylim(yard_config['image_height'], 0)
+        ax2.set_xlabel('Yard Map X')
+        ax2.set_ylabel('Yard Map Y')
+        ax2.set_aspect('equal')
+        
+        # Plot mappings
+        for pixel_key, yard_coord in mapping['camera_to_yard_mapping'].items():
+            cam_x, cam_y = map(int, pixel_key.split(','))
+            yard_x = yard_coord['yard_map_x']
+            yard_y = yard_coord['yard_map_y']
+            confidence = yard_coord['confidence']
+            
+            # Color based on confidence
+            color = plt.cm.viridis(confidence)
+            
+            # Plot on camera view
+            ax1.plot(cam_x, cam_y, 'o', color=color, markersize=2, alpha=0.5)
+            
+            # Plot on yard map
+            ax2.plot(yard_x, yard_y, 'o', color=color, markersize=1, alpha=0.3)
+        
+        # Add colorbars
+        sm = plt.cm.ScalarMappable(cmap=plt.cm.viridis, norm=plt.Normalize(0, 1))
+        sm.set_array([])
+        fig.colorbar(sm, ax=ax1, label='Confidence')
+        fig.colorbar(sm, ax=ax2, label='Confidence')
+        
+        plt.suptitle(f'Pixel Mapping Visualization - {camera_name}')
+        plt.tight_layout()
+        
+        # Save to BytesIO
+        img_buffer = BytesIO()
+        plt.savefig(img_buffer, format='png', dpi=100)
+        img_buffer.seek(0)
+        plt.close()
+        
+        return send_file(img_buffer, mimetype='image/png')
+        
+    except ImportError:
+        return jsonify({'error': 'Matplotlib not installed for visualization'}), 500
+    except Exception as e:
+        logger.error(f"Error visualizing pixel mapping: {e}")
         return jsonify({'error': str(e)}), 500

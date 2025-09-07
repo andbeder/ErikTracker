@@ -328,6 +328,14 @@ class ImageManager {
         // Start fullscreen updates
         this.updateFullscreenSnapshot();
         this.startFullscreenUpdates();
+        
+        // Auto-switch to RTSP streaming after 1 second to show immediate response
+        setTimeout(() => {
+            if (this.currentFullscreenCamera === cameraName) {
+                console.log('Auto-switching to RTSP stream for', cameraName);
+                this.toggleRTSPStream();
+            }
+        }, 1000);
     }
 
     /**
@@ -367,32 +375,68 @@ class ImageManager {
         if (!snapshot || !video || !toggleBtn) return;
         
         if (!this.isRTSPMode) {
-            // Switch to HLS stream mode
+            // Switch to live stream mode
             this.isRTSPMode = true;
-            const rtspConfig = this.cameraRTSPConfig[this.currentFullscreenCamera];
-            
-            const hlsUrl = `http://${window.location.hostname}:8080/${this.currentFullscreenCamera}/playlist.m3u8`;
             
             snapshot.style.display = 'none';
             video.style.display = 'block';
             
-            // Try to use HLS.js if available
-            if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                video.src = hlsUrl;
-            } else if (typeof Hls !== 'undefined') {
-                const hls = new Hls();
-                hls.loadSource(hlsUrl);
-                hls.attachMedia(video);
-            } else {
-                const directRTSPUrl = `http://${window.location.hostname}:${rtspConfig.port}`;
-                video.src = directRTSPUrl;
-            }
+            // Try multiple streaming approaches (direct RTSP conversion)
+            const streamUrls = [
+                // Direct RTSP to HLS conversion (bypasses Frigate)
+                `/api/${this.currentFullscreenCamera}/direct-stream.m3u8`,
+                // HLS stream via Frigate proxy (backup)
+                `/api/${this.currentFullscreenCamera}/stream.m3u8`,
+                // MJPEG stream via our proxy  
+                `/api/${this.currentFullscreenCamera}/mjpeg`,
+                // Static snapshot fallback
+                `/api/${this.currentFullscreenCamera}/latest.jpg`
+            ];
             
-            video.play().catch(e => {
-                console.warn('Video play failed:', e);
-                alert('Unable to start video stream. Please ensure RTSP forwarding is configured.');
-                this.toggleRTSPStream(); // Switch back to snapshots
-            });
+            // Try to use HLS.js if available
+            if (typeof Hls !== 'undefined') {
+                const hls = new Hls({
+                    debug: false,
+                    enableWorker: true,
+                    lowLatencyMode: true
+                });
+                
+                // Try each URL until one works
+                let urlIndex = 0;
+                const tryNextUrl = () => {
+                    if (urlIndex < streamUrls.length) {
+                        const url = streamUrls[urlIndex];
+                        console.log(`Trying stream URL ${urlIndex + 1}/${streamUrls.length}:`, url);
+                        
+                        hls.loadSource(url);
+                        hls.attachMedia(video);
+                        
+                        hls.on(Hls.Events.ERROR, (event, data) => {
+                            console.warn(`Stream URL failed:`, url, data);
+                            urlIndex++;
+                            tryNextUrl();
+                        });
+                        
+                        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                            console.log('Stream loaded successfully:', url);
+                            video.play().catch(e => console.log('Autoplay prevented:', e));
+                        });
+                    } else {
+                        console.error('All stream URLs failed, falling back to MJPEG');
+                        this.fallbackToMJPEG(video);
+                    }
+                };
+                
+                tryNextUrl();
+                this.currentHLS = hls;
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                // Native HLS support (Safari)
+                video.src = streamUrls[0];
+                video.play().catch(e => console.log('Autoplay prevented:', e));
+            } else {
+                // Fallback to MJPEG stream
+                this.fallbackToMJPEG(video);
+            }
             
             toggleBtn.textContent = '📸 Switch to Snapshots';
             
@@ -403,6 +447,19 @@ class ImageManager {
         } else {
             // Switch back to snapshot mode
             this.isRTSPMode = false;
+            
+            // Clean up HLS resources
+            if (this.currentHLS) {
+                this.currentHLS.destroy();
+                this.currentHLS = null;
+            }
+            
+            // Clean up fallback image if it exists
+            if (this.fallbackImage && this.fallbackImage.parentNode) {
+                this.fallbackImage.parentNode.removeChild(this.fallbackImage);
+                this.fallbackImage = null;
+            }
+            
             video.pause();
             video.src = '';
             video.style.display = 'none';
@@ -413,6 +470,65 @@ class ImageManager {
             this.updateFullscreenSnapshot();
             this.startFullscreenUpdates();
         }
+    }
+
+    /**
+     * Fallback to MJPEG stream when HLS fails
+     */
+    fallbackToMJPEG(video) {
+        console.log('Falling back to MJPEG stream for', this.currentFullscreenCamera);
+        
+        // Try native MJPEG video stream first
+        const mjpegStreamUrl = `/api/${this.currentFullscreenCamera}/mjpeg`;
+        
+        // Try to use the video element directly for MJPEG
+        if (video.canPlayType && video.canPlayType('video/mp4').indexOf('maybe') >= 0) {
+            // Some browsers can handle MJPEG streams in video elements
+            video.src = mjpegStreamUrl;
+            video.play().then(() => {
+                console.log('MJPEG video stream started successfully');
+            }).catch(error => {
+                console.warn('MJPEG video failed, trying image fallback:', error);
+                this.fallbackToImageRefresh(video);
+            });
+        } else {
+            // Fallback to rapid image refresh
+            this.fallbackToImageRefresh(video);
+        }
+    }
+    
+    /**
+     * Final fallback to rapid image refresh
+     */
+    fallbackToImageRefresh(video) {
+        console.log('Using rapid image refresh fallback for', this.currentFullscreenCamera);
+        
+        // Use camera snapshot endpoint for rapid refresh
+        const snapshotUrl = `/api/${this.currentFullscreenCamera}/latest.jpg`;
+        
+        // Create an img element to simulate video
+        const img = document.createElement('img');
+        img.src = snapshotUrl;
+        img.style.cssText = video.style.cssText;
+        img.alt = 'Live Camera Feed';
+        
+        // Replace video with img element
+        video.style.display = 'none';
+        video.parentNode.insertBefore(img, video);
+        
+        // Store img reference for cleanup
+        this.fallbackImage = img;
+        
+        // Auto-refresh the image
+        const refreshImage = () => {
+            if (this.isRTSPMode && this.currentFullscreenCamera && this.fallbackImage) {
+                this.fallbackImage.src = `${snapshotUrl}?t=${Date.now()}`;
+                // Refresh every 250ms for smoother motion
+                setTimeout(refreshImage, 250);
+            }
+        };
+        
+        refreshImage();
     }
 
     /**

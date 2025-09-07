@@ -1,0 +1,253 @@
+/* Camera Edit Modal Styles */
+
+.camera-edit-modal {
+    max-width: 600px;
+    width: 90%;
+    max-height: 90vh;
+    overflow-y: auto;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+
+.camera-edit-modal .modal-header {
+    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    color: white;
+    padding: 20px 30px;
+    border-radius: 12px 12px 0 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.camera-edit-modal .modal-header h2 {
+    margin: 0;
+    font-size: 1.5em;
+    font-weight: 600;
+}
+
+.camera-edit-modal .modal-body {
+    padding: 30px;
+    background: #f8f9fa;
+}
+
+.camera-edit-modal .edit-section {
+    background: white;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+    border: 1px solid #e0e0e0;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.camera-edit-modal .edit-section:last-child {
+    margin-bottom: 0;
+}
+
+.camera-edit-modal .edit-section h3 {
+    margin: 0 0 20px 0;
+    color: #333;
+    font-size: 1.1em;
+    font-weight: 600;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #f0f0f0;
+}
+
+.camera-edit-modal .form-group {
+    margin-bottom: 20px;
+}
+
+.camera-edit-modal .form-group:last-child {
+    margin-bottom: 0;
+}
+
+.camera-edit-modal .form-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: 500;
+    color: #555;
+}
+
+.camera-edit-modal .form-group input[type="text"],
+.camera-edit-modal .form-group input[type="url"],
+.camera-edit-modal .form-group input[type="number"],
+.camera-edit-modal .form-group select,
+.camera-edit-modal .form-group textarea {
+    width: 100%;
+    padding: 10px 15px;
+    border: 2px solid #e0e0e0;
+    border-radius: 6px;
+    font-size: 14px;
+    font-family: inherit;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.camera-edit-modal .form-group input:focus,
+.camera-edit-modal .form-group select:focus,
+.camera-edit-modal .form-group textarea:focus {
+    outline: none;
+    border-color: #4facfe;
+    box-shadow: 0 0 0 3px rgba(79, 172, 254, 0.1);
+}
+
+.camera-edit-modal .form-group small {
+    display: block;
+    margin-top: 5px;
+    color: #666;
+    font-size: 12px;
+    font-style: italic;
+}
+
+.camera-edit-modal .form-group input[type="checkbox"] {
+    width: auto;
+    margin-right: 8px;
+    transform: scale(1.2);
+}
+
+.camera-edit-modal .form-group label:has(input[type="checkbox"]) {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+}
+
+/* Custom resolution group */
+#customResolutionGroup {
+    display: flex;
+    gap: 15px;
+    align-items: center;
+}
+
+#customResolutionGroup input {
+    flex: 1;
+}
+
+#customResolutionGroup label {
+    margin-bottom: 0;
+    white-space: nowrap;
+}
+
+.camera-edit-modal .modal-footer {
+    padding: 20px 30px;
+    background: #f8f9fa;
+    border-radius: 0 0 12px 12px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    border-top: 1px solid #e0e0e0;
+}
+
+.camera-edit-modal .btn {
+    padding: 12px 24px;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.camera-edit-modal .btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.camera-edit-modal .btn-primary {
+    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    color: white;
+}
+
+.camera-edit-modal .btn-secondary {
+    background: #6c757d;
+    color: white;
+}
+
+.camera-edit-modal .btn-test {
+    background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+    color: white;
+}
+
+.camera-edit-modal .btn-test:hover {
+    background: linear-gradient(135deg, #218838 0%, #1abc9c 100%);
+}
+
+.camera-edit-modal .close {
+    color: white;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+    line-height: 1;
+    opacity: 0.8;
+    transition: opacity 0.3s ease;
+}
+
+.camera-edit-modal .close:hover {
+    opacity: 1;
+}
+
+/* Status message */
+#cameraEditStatus {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    padding: 15px 20px;
+    border-radius: 6px;
+    font-weight: 500;
+    z-index: 10001;
+    max-width: 400px;
+    word-wrap: break-word;
+}
+
+#cameraEditStatus.success {
+    background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+    color: white;
+}
+
+#cameraEditStatus.error {
+    background: linear-gradient(135deg, #dc3545 0%, #fd7e14 100%);
+    color: white;
+}
+
+#cameraEditStatus.info {
+    background: linear-gradient(135deg, #17a2b8 0%, #6f42c1 100%);
+    color: white;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+    .camera-edit-modal {
+        width: 95%;
+        max-height: 95vh;
+    }
+    
+    .camera-edit-modal .modal-body {
+        padding: 20px;
+    }
+    
+    .camera-edit-modal .edit-section {
+        padding: 15px;
+        margin-bottom: 15px;
+    }
+    
+    .camera-edit-modal .modal-footer {
+        padding: 15px 20px;
+        flex-direction: column;
+    }
+    
+    .camera-edit-modal .btn {
+        width: 100%;
+        justify-content: center;
+    }
+    
+    #customResolutionGroup {
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    #customResolutionGroup input {
+        width: 100%;
+    }
+}
